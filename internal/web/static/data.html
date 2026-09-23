@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title data-i18n="ui.title.data">Freeway Pi — data</title>
+<meta name="theme-color" content="#0f1720" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Freeway Pi">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="uplot.css">
+<link rel="stylesheet" href="style.css">
+<script src="api/lang.js"></script>
+<script src="i18n.js"></script>
+<script src="theme.js"></script>
+  <script src="link.js"></script>
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(0 12 12)"/><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(90 12 12)"/><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(180 12 12)"/><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(270 12 12)"/></g></svg>
+    <h1><span class="brand-name">Freeway&nbsp;Pi</span><span class="brand-page" data-i18n="ui.nav.data">Data og grafer</span></h1>
+  </a>
+  <div class="head-right">
+    <div id="resolution" class="freshness"></div>
+    <button id="menu-button" class="icon-button" aria-label="Meny" data-i18n-aria-label="ui.menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<nav id="menu" class="menu" hidden>
+  <a class="menu-item" href="index.html" data-i18n="ui.nav.overview">Oversikt</a>
+  <a class="menu-item current" href="data.html" data-i18n="ui.nav.data">Data og grafer</a>
+  <a class="menu-item" href="settings.html" data-i18n="ui.nav.settings">Aggregatinnstillinger</a>
+  <a class="menu-item" href="programs.html" data-i18n="ui.nav.programs">Uke- og årsprogram</a>
+  <a class="menu-item" href="alarms.html" data-i18n="ui.nav.alarms">Aggregatalarmer</a>
+  <a class="menu-item" href="system.html" data-i18n="ui.nav.system">System</a>
+</nav>
+
+<main class="data-main">
+  <div id="banner" class="banner" hidden><span id="banner-text"></span></div>
+
+  <!-- Filters in one row above the charts, and one range for both, so the two
+       are always showing the same window. -->
+  <div class="ranges" id="ranges" role="group" aria-label="Tidsrom" data-i18n-aria-label="ui.range"></div>
+
+  <section class="card chart-card">
+    <div class="card-label" data-i18n="ui.temperatures">Temperaturer</div>
+    <div class="chart" id="chart-temp"></div>
+  </section>
+
+  <section class="card chart-card">
+    <!-- Its own chart rather than a second axis on the one above: two scales
+         on one frame is the most reliable way to make a chart lie. -->
+    <div class="card-label" data-i18n="ui.fan.recovery">Vifte og gjenvinning</div>
+    <div class="chart" id="chart-pct"></div>
+    <!-- Directly under the fan curve rather than in a card of its own. The fan
+         curve does not explain itself: overpressure runs supply and extract at
+         set levels of their own, often below the normal level — so it can show
+         up as the fan dropping, which is the last thing anybody would read it
+         as. The answer has to be at the same place on the same time axis to be
+         read at a glance. -->
+    <p class="setting-help" data-i18n="ui.overpressure.help"></p>
+    <div class="chart chart-band" id="chart-overpressure"></div>
+  </section>
+
+  <!-- Freeway Pi's own health, kept apart from the unit's readings because
+       it is a different subject: everything above is what the ventilation is
+       doing, and this is whether the wire between them is sound. Same time
+       axis, so a burst here can be read against what the unit did then. -->
+  <section class="card chart-card">
+    <div class="card-label" data-i18n="ui.freewaypi.health">Freeway Pi</div>
+    <p class="setting-help" data-i18n="ui.bus.errorrate.help"></p>
+    <div class="chart" id="chart-bus"></div>
+    <p class="setting-help" data-i18n="ui.undervoltage.help"></p>
+    <div class="chart chart-band" id="chart-power"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-label" data-i18n="ui.download">Last ned</div>
+    <p class="setting-help">
+      <span data-i18n="ui.download.help"></span>
+      <a id="download-point" href="#" data-i18n="ui.download.point"></a>
+      <span data-i18n="ui.download.help.tail"></span>
+    </p>
+    <div class="save-row">
+      <a class="primary" id="download" href="#" download data-i18n="ui.download.csv">Last ned CSV</a>
+      <span class="save-feedback" id="download-note"></span>
+    </div>
+  </section>
+</main>
+
+<script src="uplot.js"></script>
+<script src="data.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+# RS-485 adapter for the ventilation unit.
+#
+# Install to /etc/udev/rules.d/ and reload with:
+#   sudo cp packaging/99-freeway-rs485.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo udevadm trigger --action=add --subsystem-match=usb-serial --subsystem-match=tty
+#
+# Both subsystems, because the two rules below match different ones: the
+# latency timer lives on the usb-serial device and the symlink on the tty.
+# Triggering only one leaves the other silently unapplied.
+
+# A stable name, so USB enumeration order cannot silently point the daemon at
+# something else. Matched on the FTDI vendor and product id; if a second FTDI
+# device is ever attached, add ATTRS{serial}=="..." to disambiguate.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", \
+  SYMLINK+="freeway-rs485", GROUP="dialout", MODE="0660"
+
+# FTDI chips ship with a 16 ms latency timer: the chip holds a short read for
+# up to 16 ms before passing it upstream, in the hope more bytes arrive. That
+# is a long wait on a bus where a whole request and answer can complete in 20,
+# and it is the standard first fix for sluggish Modbus over USB.
+#
+# Deliberately not restricted to ACTION=="add": udevadm trigger replays events
+# as "change", so an add-only rule appears to install correctly and then does
+# nothing until the adapter is physically unplugged.
+SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"

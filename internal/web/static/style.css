@@ -1,0 +1,1096 @@
+/* One stylesheet, no framework, no build step. The page has to feel instant on
+   a phone over Wi-Fi, and the fastest thing to ship is the thing that is not
+   there. */
+
+:root {
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --text: #16202b;
+  --muted: #61707f;
+  --line: #d2dae2;
+  --outline: #b3c0cc;
+  --accent: #0b6fa4;
+  --accent-text: #ffffff;
+  --warn-bg: #fff4e2;
+  --warn-text: #7a4a04;
+  --bad-bg: #fdecec;
+  --bad-text: #93231f;
+
+  /* NS 5575 colours the air by what it is, not by how warm it is: outdoor air
+     blue, supply red, extract yellow, exhaust green. That is what a
+     ventilation engineer expects and what is likely printed on the ducts.
+     Variables rather than literals so dark mode is a value here and not a
+     second copy of the rules. */
+  --air-outdoor: #2a78d6;
+  --air-supply: #e34948;
+  --air-extract: #eda100;
+  --air-exhaust: #008300;
+
+  --radius: 14px;
+}
+
+/* Dark mode twice, because the two selectors cannot be merged: one lives in a
+   media query and the other does not. The first follows the system, the second
+   is the manual choice. Keep them in step — a value changed in one and not the
+   other shows up only for whoever picked the other.
+
+   light-dark() would collapse this to one block, and is deliberately not used:
+   a browser that lacks it loses every colour at once, and this page has to work
+   on whatever is in the house. */
+@media (prefers-color-scheme: dark) {
+  /* Not when light has been chosen by hand. */
+  :root:not([data-theme="light"]) {
+    --bg: #0f1720;
+    --card: #17222e;
+    --text: #e7eef5;
+    --muted: #93a3b2;
+    --line: #253442;
+    --outline: #35485a;
+    --accent: #4db6e2;
+    --accent-text: #08131c;
+    --warn-bg: #3a2c11;
+    --warn-text: #ffd692;
+    --bad-bg: #3b1d1c;
+    --bad-text: #ffb4b0;
+    /* Lifted for the dark surface; validated against it, see the note in
+       data.js for what the contrast check said. */
+    --air-outdoor: #4d9bef;
+    --air-supply: #ff7b6b;
+    --air-extract: #ffcf4d;
+    --air-exhaust: #2fbf72;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+    --bg: #0f1720;
+    --card: #17222e;
+    --text: #e7eef5;
+    --muted: #93a3b2;
+    --line: #253442;
+    --outline: #35485a;
+    --accent: #4db6e2;
+    --accent-text: #08131c;
+    --warn-bg: #3a2c11;
+    --warn-text: #ffd692;
+    --bad-bg: #3b1d1c;
+    --bad-text: #ffb4b0;
+    /* Lifted for the dark surface; validated against it, see the note in
+       data.js for what the contrast check said. */
+    --air-outdoor: #4d9bef;
+    --air-supply: #ff7b6b;
+    --air-extract: #ffcf4d;
+    --air-exhaust: #2fbf72;
+  color-scheme: dark;
+}
+
+/* Said explicitly for the manual choice, so form controls, scrollbars and the
+   text-selection colour follow the page rather than the system. */
+:root[data-theme="light"] { color-scheme: light; }
+
+* { box-sizing: border-box; }
+
+/* The hidden attribute is display:none in the user-agent stylesheet, and any
+   display in author CSS beats it. .banner sets display:flex, so hiding it did
+   nothing: the element stayed as an empty coloured strip under the header on
+   every page, and a banner that had been cleared looked like one that had
+   merely lost its text. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  padding: 0 16px env(safe-area-inset-bottom) 16px;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(env(safe-area-inset-top) + 16px) 0 10px;
+  max-width: 940px;
+  margin: 0 auto;
+}
+
+/* The brand is the same on every page and is the way back to the overview.
+   The page name sits under it, small and quiet, so what the heading says is
+   what the product is called rather than which corner of it you are in — and
+   so there is something obvious to tap to get home. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  min-width: 0;
+}
+.brand:hover .brand-name { color: var(--accent); }
+.mark { width: 30px; height: 30px; flex: 0 0 auto; }
+
+h1 {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.1;
+  min-width: 0;
+}
+
+.brand-name {
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* Same shape as a card label, because it does the same job: it says what this
+   is, quietly, above the thing itself. */
+.brand-page {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.head-right { display: flex; align-items: center; gap: 10px; }
+
+.icon-button {
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--text);
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.icon-button svg { width: 20px; height: 20px; }
+
+.menu {
+  max-width: 940px;
+  margin: 0 auto 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px;
+}
+.menu-item {
+  display: block;
+  padding: 11px 12px;
+  border-radius: 9px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 15px;
+}
+.menu-item.current { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.menu-item.disabled { color: var(--muted); pointer-events: none; }
+.menu-note { margin: 4px 12px 8px; font-size: 12px; color: var(--muted); }
+
+.freshness { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.freshness.stale { color: var(--warn-text); }
+
+main {
+  max-width: 940px;
+  margin: 0 auto;
+  display: grid;
+  gap: 12px;
+  /* Generous on a phone: in a normal Safari tab the floating address bar sits
+     on top of whatever is last. Standalone mode and desktop do not have that
+     problem, so they do not pay for it. */
+  padding-bottom: 84px;
+}
+
+/* Two stacks on a wide screen, one on a phone — and the order differs between
+   them.
+   Wide: the house on the left with the two cards that are only information
+   beneath it, the controls on the right. Each side packs its own cards, so
+   neither knows how tall the other is. The cards used to be placed into one
+   shared grid by class, which makes every row as tall as the tallest card in
+   it — the house — so the card beside it got a hole the height of the house
+   underneath and the rest of the left column stood empty.
+   Narrow: the wrappers step out of the way with display: contents, which makes
+   the cards direct children of main again so each can be ordered on its own.
+   The controls are why the page was opened, so on a phone they come before the
+   information. */
+.col-house,
+.col-main { display: contents; }
+
+/* Last on a phone. On a wide screen these sit in the left stack beside the
+   house, which has the default order of 0, so the same rule already puts them
+   under it and needs no undoing. */
+.info-card,
+.more-card { order: 1; }
+
+@media (min-width: 720px) {
+  main {
+    grid-template-columns: minmax(0, 470px) minmax(0, 1fr);
+    align-items: start;
+    padding-bottom: 32px;
+  }
+  .banner { grid-column: 1 / -1; }
+  .col-house,
+  .col-main {
+    display: grid;
+    gap: 12px;
+    align-content: start;
+  }
+  .col-house { grid-column: 1; }
+  .col-main { grid-column: 2; }
+}
+
+.banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--radius);
+  background: var(--bad-bg);
+  color: var(--bad-text);
+  font-size: 14px;
+}
+.banner.warn { background: var(--warn-bg); color: var(--warn-text); }
+/* A strip may carry more than one message; they stack rather than run
+   together into one sentence. */
+.banner-line { margin: 0; }
+.banner-line + .banner-line { margin-top: 6px; }
+
+.banner-action {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border: 1px solid currentColor;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+}
+
+.card-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.card-foot { margin-top: 10px; font-size: 14px; color: var(--muted); }
+.card-foot strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Temperature ------------------------------------------------------------ */
+
+.setpoint-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+.setpoint { font-size: 54px; font-weight: 300; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.setpoint .unit { font-size: 24px; color: var(--muted); margin-left: 2px; }
+
+/* 52px keeps these comfortably above the size a thumb needs. */
+.step {
+  width: 56px; height: 56px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.step:active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+/* Text fields ------------------------------------------------------------ */
+
+/* Every text field, wherever it is placed. Fields were styled only inside
+   particular containers — .field, .hook, .gate-form — so one outside them,
+   like the wifi password, fell through to the browser's own and sat among
+   the page's fields looking like it belonged to another site. The containers
+   still refine size and width; this is the floor under all of them. 16px
+   because anything smaller makes iOS zoom the page on focus. */
+input[type=text], input[type=password], input[type=url], input[type=email],
+input[type=search], input[type=tel], input:not([type]) {
+  padding: 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+  min-width: 0;
+}
+
+/* Fan -------------------------------------------------------------------- */
+
+.fan-row { display: flex; align-items: center; gap: 14px; }
+
+input[type=range] {
+  flex: 1 1 auto;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 34px;
+  background: transparent;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 3px; background: var(--line);
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 30px; height: 30px; margin-top: -12px;
+  border-radius: 50%; background: var(--accent); border: none;
+}
+input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--line); }
+input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: none; border-radius: 50%; background: var(--accent); }
+
+#fan-value { font-size: 22px; font-weight: 500; min-width: 3.4em; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Modes ------------------------------------------------------------------ */
+
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; }
+
+.mode {
+  padding: 13px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mode[aria-pressed=true] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+/* Overpressure ----------------------------------------------------------- */
+
+.op-row { display: flex; align-items: center; gap: 12px; }
+
+.primary {
+  flex: 1 1 auto;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.primary.on { background: var(--warn-text); }
+
+.op-minutes { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; }
+.op-minutes input {
+  width: 68px; padding: 12px 8px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg); color: var(--text);
+  font-size: 16px; text-align: center;
+}
+
+/* Status ----------------------------------------------------------------- */
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips:empty { display: none; }
+
+.chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+}
+.chip.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.chip.alarm { background: var(--bad-bg); color: var(--bad-text); border-color: transparent; }
+
+.readings {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 10px 14px;
+}
+.reading { display: flex; flex-direction: column; gap: 1px; }
+.reading dt { font-size: 12px; color: var(--muted); }
+.reading dd { margin: 0; font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* Anything the unit is not currently telling us should look uncertain rather
+   than authoritative. */
+body.stale main { opacity: 0.62; }
+
+
+/* House ------------------------------------------------------------------ */
+
+.house-card { padding: 10px; }
+
+/* Capped rather than fluid. Full width on a desktop turned a glance into a
+   430 pixel mural; the drawing carries no more information when it is bigger. */
+.house { width: 100%; max-width: 430px; height: auto; display: block; margin: 0 auto; }
+
+.house .wall, .house .roof {
+  fill: none;
+  stroke: var(--outline);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.house .ahu {
+  fill: var(--bg);
+  stroke: var(--outline);
+  stroke-width: 2.5;
+}
+.house .ahu-label {
+  fill: var(--muted);
+  font-size: 12px;
+  text-anchor: middle;
+}
+
+.house .flow path { fill: none; stroke-width: 3.5; stroke-linecap: round; }
+.house .flow text { fill: var(--muted); font-size: 12px; }
+.house .flow .val { font-size: 17.5px; font-weight: 600; fill: var(--text); font-variant-numeric: tabular-nums; }
+.house .flow .right { text-anchor: end; }
+
+.house .air-outdoor path { stroke: var(--air-outdoor); }
+.house .air-supply  path { stroke: var(--air-supply); }
+.house .air-extract path { stroke: var(--air-extract); }
+.house .air-exhaust path { stroke: var(--air-exhaust); }
+
+/* Markers cannot inherit the stroke of the path that uses them without
+   context-stroke, which Safari does not implement, so each has its own fill. */
+.house .m-outdoor path { fill: var(--air-outdoor); }
+.house .m-supply  path { fill: var(--air-supply); }
+.house .m-extract path { fill: var(--air-extract); }
+.house .m-exhaust path { fill: var(--air-exhaust); }
+
+.house-foot { margin-top: 4px; }
+
+/* More readings ---------------------------------------------------------- */
+
+details summary {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--muted);
+  list-style: none;
+  padding: 2px 0;
+}
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: "▸ "; }
+details[open] summary::before { content: "▾ "; }
+details[open] summary { margin-bottom: 10px; }
+
+/* Modes ------------------------------------------------------------------ */
+
+.mode.danger { color: var(--bad-text); border-color: var(--bad-bg); }
+.mode.danger[aria-pressed=true] { background: var(--bad-text); color: var(--card); border-color: transparent; }
+
+/* Dialog ----------------------------------------------------------------- */
+
+dialog {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text);
+  padding: 18px;
+  max-width: 320px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+}
+dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog p { margin: 0 0 16px; }
+
+.dialog-buttons { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.dialog-buttons button {
+  padding: 10px 16px;
+  border-radius: 9px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+.dialog-buttons .danger { background: var(--bad-text); color: var(--card); border-color: transparent; }
+/* The recommended answer, when a dialog has one. Without this the button rule
+   above outranked .primary and the choice worth taking looked like the others. */
+.dialog-buttons .primary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+
+
+/* Connection ------------------------------------------------------------- */
+
+/* The dot's left edge sits at x=6 in the drawing, the same place the outdoor
+   and waste temperatures start, so the two line up at every width. */
+.house .link text { fill: var(--text); font-size: 13px; font-weight: 600; }
+.house .dot { fill: var(--muted); }
+.house .dot.ok { fill: #34a853; }
+.house .dot.degraded { fill: #e8a13c; }
+/* Red alone is a poor signal for the eight per cent of men who cannot easily
+   separate it from green, so the label carries the meaning and the dot only
+   reinforces it. */
+.house .dot.down { fill: #d93025; }
+
+
+/* Charts ----------------------------------------------------------------- */
+
+.data-main { max-width: 940px; }
+@media (min-width: 720px) {
+  /* One column: a chart squeezed into half a screen loses the detail it was
+     drawn to show. */
+  .data-main { grid-template-columns: 1fr; }
+  .data-main .chart-card { grid-column: 1; }
+}
+
+.ranges { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.range {
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.range[aria-pressed=true] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+.chart-card { padding: 14px 12px 8px; }
+.chart { width: 100%; min-height: 240px; }
+
+/* uPlot ships light-mode chrome. Its own marks are themed from JavaScript,
+   where the palette is validated; this is only the furniture around them. */
+.u-legend { font-size: 13px; color: var(--muted); padding-top: 6px; }
+.u-legend .u-marker { border-radius: 2px; }
+/* Values and labels wear text tokens, never the series colour: the swatch
+   beside them already carries identity. */
+.u-legend th, .u-legend td { color: var(--muted); font-weight: 400; }
+.u-legend .u-label { color: var(--text); }
+.u-select { background: rgba(77, 182, 226, 0.18); }
+.u-cursor-x, .u-cursor-y { border-color: var(--line); }
+.u-over { touch-action: pan-y; }
+
+@media (max-width: 480px) {
+  /* Four series in one row runs off a phone; let the legend wrap. */
+  .u-legend .u-series { display: inline-flex; }
+}
+
+
+/* Settings --------------------------------------------------------------- */
+
+.link-button {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px 2px;
+}
+
+.gate-help, .gate-note { margin: 0 0 12px; font-size: 14px; color: var(--muted); }
+.gate-note { margin: 10px 0 0; font-size: 13px; }
+
+.gate-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.gate-form input {
+  flex: 1 1 180px;
+  padding: 13px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+}
+.gate-form .primary { flex: 0 0 auto; }
+.gate-form .primary:disabled { opacity: 0.65; cursor: progress; }
+
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+.setting:first-of-type { border-top: none; }
+
+.setting-text { min-width: 0; }
+.setting-label { font-size: 15px; display: block; }
+.setting-help { margin: 3px 0 0; font-size: 13px; color: var(--muted); }
+
+.setting-control { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.setting-control input[type=number] {
+  width: 92px;
+  padding: 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+  text-align: right;
+}
+.setting-control input:disabled { opacity: 0.5; }
+.setting-unit { color: var(--muted); font-size: 14px; min-width: 2.6em; }
+
+/* A checkbox big enough to hit with a thumb, without a pile of markup. */
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 50px;
+  height: 30px;
+  border-radius: 15px;
+  background: var(--line);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: var(--card);
+  transition: transform 0.15s;
+}
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(20px); }
+.switch:disabled { opacity: 0.5; }
+
+@media (min-width: 720px) {
+  /* Settings read as one column: they are a list to go down, not a dashboard. */
+  main:has(#settings) { grid-template-columns: minmax(0, 620px); }
+}
+
+
+/* Timer programs --------------------------------------------------------- */
+
+.banner-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.program {
+  border-top: 1px solid var(--line);
+  padding: 14px 0 16px;
+  display: grid;
+  gap: 10px;
+}
+.program:first-of-type { border-top: none; }
+
+.program-title { font-size: 13px; color: var(--muted); }
+
+.days { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Round, thumb-sized, and labelled by name for a screen reader: the single
+   letters repeat (two for Tuesday and Thursday) and cannot carry the meaning
+   on their own. */
+.day {
+  width: 40px; height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.day[aria-pressed=true] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+.times { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.year-times { gap: 10px; }
+
+.field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.field input, .field select {
+  padding: 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+}
+.field select { min-width: 180px; }
+.field input[type=number] { width: 84px; text-align: right; }
+
+.program-save { justify-self: start; padding: 11px 20px; }
+
+.add {
+  margin-top: 12px;
+  padding: 11px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  width: 100%;
+}
+
+@media (min-width: 720px) {
+  main:has(#week) { grid-template-columns: minmax(0, 720px); }
+}
+
+
+/* Saving a programme ------------------------------------------------------ */
+
+.save-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* Air above the buttons. Without it they sit flush against whatever the card
+   says, which reads as cramped everywhere the content above has no margin of
+   its own.
+
+   A card's own row only. Deeper ones sit inside a grid that already spaces
+   them — .program has a 10px gap — and this would be added on top of it. */
+.card > .save-row { margin-top: 14px; }
+
+/* The outcome belongs beside the button that caused it. A message at the top
+   of a long page is invisible on a phone that has scrolled past it. */
+.save-feedback { font-size: 13px; color: var(--muted); }
+.save-feedback.good { color: #1b8a4b; }
+.save-feedback.bad { color: var(--bad-text); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .save-feedback.good { color: #4fc47f; }
+}
+:root[data-theme="dark"] .save-feedback.good { color: #4fc47f; }
+
+.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+
+/* A quiet button beside a loud one: removing is not the usual action. Styled on
+   the class rather than only inside .save-row, since these turn up in dialogs
+   and beside a countdown too, and a button with no padding at all was the
+   result. */
+.ghost {
+  padding: 11px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+.ghost:hover { color: var(--text); border-color: var(--muted); }
+.ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Red on hover is for the ones that remove something, said by a class rather
+   than by where the button happens to sit. "Send testvarsel" and "Se etter
+   oppdateringer" are quiet buttons in the same row and destroy nothing. */
+.ghost.remove:hover { color: var(--bad-text); border-color: var(--bad-text); }
+
+
+/* Icons ------------------------------------------------------------------ */
+
+/* The sprite is markup, not a picture: it defines symbols and draws nothing. */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+.chip { display: inline-flex; align-items: center; gap: 5px; }
+.chip-icon { width: 15px; height: 15px; flex: 0 0 auto; }
+
+.house .ahu-fan { color: var(--muted); }
+.house .ahu-fan use { color: var(--muted); }
+.house .ahu-fan text {
+  fill: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* System ------------------------------------------------------------------ */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px 16px;
+}
+.fact { margin: 0; display: flex; flex-direction: column; gap: 1px; }
+.fact dt { font-size: 12px; color: var(--muted); }
+.fact dd { margin: 0; font-size: 15px; font-weight: 500; }
+
+/* A fact can be reassuring, worth noticing, or wrong. The word carries it;
+   the colour only reinforces. */
+.fact dd.good { color: #1b8a4b; }
+.fact dd.warn { color: var(--warn-text); }
+.fact dd.bad  { color: var(--bad-text); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .fact dd.good { color: #4fc47f; }
+}
+:root[data-theme="dark"] .fact dd.good { color: #4fc47f; }
+
+.alarm { border-top: 1px solid var(--line); padding: 11px 0; }
+.alarm:first-child { border-top: none; }
+.alarm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.alarm-name { font-size: 15px; font-weight: 500; }
+.alarm-name.bad { color: var(--bad-text); }
+.alarm-time { font-size: 13px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.alarm-time.warn { color: var(--warn-text); }
+.setting-help.warn { color: var(--warn-text); }
+
+.history { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.history > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 4px 0;
+  /* The stock triangle sits differently in every browser, so it is replaced
+     with one that lines up with the text at any size. */
+  list-style: none;
+}
+.history > summary::-webkit-details-marker { display: none; }
+.history > summary::before { content: "\25B8"; display: inline-block; width: 1.1em; }
+.history[open] > summary::before { content: "\25BE"; }
+
+.hooks { margin-top: 16px; }
+.hook { display: flex; align-items: center; gap: 8px; padding: 8px 0; flex-wrap: wrap; }
+.hook input[type=text], .hook input[type=url] {
+  padding: 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  min-width: 0;
+}
+.hook input[type=text] { flex: 1 1 120px; }
+.hook .hook-url { flex: 3 1 260px; }
+
+textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+}
+
+.client {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+.client-addr { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+@media (min-width: 720px) {
+  main:has(#health) { grid-template-columns: minmax(0, 760px); }
+}
+
+/* A download is a link, not a button, so it behaves like one — but it should
+   look like the action it is. */
+a.primary { display: inline-block; text-decoration: none; text-align: center; }
+
+/* Three pages wrap their cards in one element so the whole lot can be hidden
+   behind the PIN, or because the cards are built by script. That wrapper is a
+   plain div and not the grid, so without this the cards inside it sit flush
+   against each other while the pages that put cards straight into main have
+   air between them. Same gap as main's, so the two kinds of page match. */
+#content,
+#settings {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+/* --- loading ------------------------------------------------------------ */
+
+/* Counting pending updates shells out to apt, which takes about fifteen
+   seconds on this hardware. The page used to render empty and fill in later,
+   which reads as broken rather than as busy. */
+.loading {
+  display: grid;
+  gap: 8px;
+}
+
+.loading .bar {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--line) 25%, var(--card) 50%, var(--line) 75%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.loading .bar:nth-child(2) { width: 82%; }
+.loading .bar:nth-child(3) { width: 64%; }
+
+@keyframes shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+/* Honouring the setting rather than the fashion: a shimmer is decoration, and
+   for somebody who gets motion sick it is decoration that costs them. */
+@media (prefers-reduced-motion: reduce) {
+  .loading .bar { animation: none; }
+}
+
+.working {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- package table ------------------------------------------------------ */
+
+table.packages {
+  width: 100%;
+  margin: 8px 0 0;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  /* Long enough lists are worth scrolling rather than pushing the button that
+     installs them off the screen. */
+  display: block;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+table.packages thead th {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 4px 8px 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+table.packages td {
+  padding: 5px 8px 5px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+table.packages tr:last-child td { border-bottom: none; }
+table.packages th:last-child,
+table.packages td:last-child { padding-right: 0; }
+
+.packages .pkg-name { font-weight: 600; word-break: break-all; }
+.packages .num { color: var(--muted); }
+.packages .upd-kind { white-space: nowrap; text-align: right; }
+.packages tr.security .pkg-name,
+.packages tr.security .upd-kind { color: var(--warn-text); }
+
+.log {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* --- danger ------------------------------------------------------------- */
+
+/* Restart and shut down look like every other button and are red. Same shape
+   on purpose: a control that stops the box should be as easy to hit as any
+   other, and as hard to hit by accident — which is what the confirmation
+   dialog is for, not the styling. */
+.primary.danger {
+  background: var(--bad-text);
+  color: #ffffff;
+}
+
+.primary.danger:hover:not(:disabled) { filter: brightness(1.12); }
+
+/* The service countdown and the button that restarts it. Spaced by the
+   container, like the setting rows above it. */
+.service-status {
+  display: grid;
+  gap: 4px;
+  padding-top: 10px;
+}
+
+/* What the unit is doing to the air, beside the unit in the house.
+   Dimmed unless it is happening: all three stay put so the row does not move
+   about as the unit changes what it is doing. */
+.outputs .output {
+  color: var(--muted);
+  opacity: 0.45;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.outputs .output.on {
+  color: var(--text);
+  opacity: 1;
+}
+
+.outputs text {
+  fill: currentColor;
+  /* Small: three of these sit side by side in the width left over beside the
+     unit, and at 11px "17 %" and "0 %" all but touched. */
+  font-size: 10px;
+  font-weight: 600;
+  text-anchor: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outputs .output { transition: none; }
+}
+
+/* Renaming the unit, in the card that reports on it. */
+.unit-name { margin-bottom: 14px; }
+.unit-name-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.unit-name-row input { flex: 1 1 160px; min-width: 0; }
+
+/* The language button says which language is in force, in two letters. */
+.lang-button {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The wifi list. Name on the left, what is worth knowing about it in the
+   middle, the buttons on the right — and on a phone it stacks rather than
+   squeezing an SSID into four characters. */
+.wifi-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 0; border-bottom: 1px solid var(--line);
+}
+.wifi-row:last-child { border-bottom: none; }
+.wifi-name { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.wifi-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.wifi-buttons { display: flex; gap: 8px; margin-left: auto; }
+.wifi-join {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 0 0 12px;
+}
+.wifi-join input { flex: 1 1 180px; }
+
+/* The link strip: the unit is not answering, on whichever page you happen to
+   be standing. Above the page's own banner, because a page-level message must
+   not be able to hide the fact that nothing is getting through. */
+#link-strip {
+  display: block;
+  background: var(--bad-bg);
+  color: var(--bad-text);
+  border: 1px solid var(--bad-text);
+}
+

@@ -1,0 +1,79 @@
+#!/bin/sh
+# Undoes a change nobody ever confirmed, once, at boot.
+#
+# Every risky change to this box — an address, a wifi network, a firewall —
+# arms a revert before it applies, so a box that becomes unreachable comes back
+# by itself. That revert is a transient systemd timer, and a transient unit
+# lives in memory: it does not survive a reboot.
+#
+# Which leaves the obvious hole. Change the address, lose the box, and do the
+# natural thing — pull the power and put it back. NetworkManager comes up and
+# applies the new, broken settings. The timer is gone. The saved file is still
+# there and nothing reads it. The box is now permanently on an address nobody
+# can reach, and the only way in is a keyboard and a screen in a utility room.
+#
+# So: if a saved file is still here at boot, roll it back.
+#
+# That reads as a guess, and it is not. Confirming deletes the file. Reverting
+# deletes the file. A file that is still here means neither happened, which
+# means the box went down inside the revert window — exactly the case where the
+# change was never shown to work. The reboot is the evidence.
+#
+# The one judgement call: a power cut during those ninety seconds undoes a
+# change that might have been perfectly fine. That is deliberate. Rolling back
+# costs somebody pressing save a second time; not rolling back costs a trip to
+# the cupboard with a monitor. The asymmetry only points one way.
+set -eu
+
+SAVED_DIR=/var/lib/freeway-helper
+HELPER=/opt/freeway/bin/freeway-helper
+HARDEN=/opt/freeway/bin/freeway-harden
+
+# Just stdout. Under systemd that lands in the journal attributed to this unit,
+# which is where anybody looking for it will be; run by hand it lands on the
+# terminal, which is also where anybody looking for it will be. Calling logger
+# as well only printed everything twice.
+say() { echo "$1"; }
+
+# Spoken through the helper rather than reimplemented here. Two copies of
+# "put the network back" is one copy too many, and this one would be the copy
+# nobody ever runs.
+#
+# The helper answers a refusal with "feil: …" on stdout and exits zero, on
+# purpose: a non-zero exit makes systemd tear the socket connection down before
+# the reason reaches whoever asked. So the exit status says nothing here and
+# the answer has to be read.
+ask() {
+	answer=$(printf 'op=%s\n.\n' "$1" | "$HELPER" 2>&1) || true
+	case "$answer" in
+	"feil: "*) say "$1: ${answer#feil: }"; return 1 ;;
+	esac
+	say "$1: $answer"
+	return 0
+}
+
+did=0
+
+if [ -f "$SAVED_DIR/network-before" ]; then
+	say "a network change was never confirmed and this box has rebooted; putting the old settings back"
+	ask revert || say "the network revert did not work; the saved settings are still in $SAVED_DIR"
+	did=1
+fi
+
+if [ -f "$SAVED_DIR/wifi-before" ]; then
+	say "a wifi change was never confirmed and this box has rebooted; going back to the old network"
+	ask wifi-revert || say "the wifi revert did not work; the saved network is still in $SAVED_DIR"
+	did=1
+fi
+
+# The flag, not the backup. The backup outlives a confirm on purpose, so that
+# somebody can still undo the hardening later; keying on it here would undo a
+# firewall that was confirmed weeks ago on every single boot.
+if [ -f "$SAVED_DIR/harden-unconfirmed" ] && [ -x "$HARDEN" ]; then
+	say "a firewall change was never confirmed and this box has rebooted; taking it down"
+	"$HARDEN" revert || say "the firewall revert failed; the saved ruleset is still in $SAVED_DIR"
+	did=1
+fi
+
+[ "$did" = 1 ] || exit 0
+say "the box is back on the settings it had before the change that was not confirmed"

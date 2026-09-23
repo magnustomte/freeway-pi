@@ -1,0 +1,24 @@
+[Unit]
+Description=Freeway Pi: apply the lasting ssh setting
+Documentation=file:/opt/freeway/bin/freeway-helper
+# After nftables, because this reaches into the ruleset it just loaded. The
+# file on disk carries whatever the policy was when the firewall was built;
+# this converges it on whatever the policy is now, so changing the setting
+# survives a reboot without anything editing the rule file.
+After=nftables.service
+Wants=nftables.service
+Before=freewayd.service
+ConditionPathExists=/opt/freeway/bin/freeway-helper
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+# ssh-shut returns the chain to the lasting setting — open or closed — and
+# cancels any temporary opening, which a reboot has already ended anyway.
+ExecStart=/bin/sh -c 'echo op=ssh-shut | /opt/freeway/bin/freeway-helper'
+TimeoutStartSec=30
+# No firewall is a normal state and must not look like a fault.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

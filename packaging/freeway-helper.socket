@@ -1,0 +1,17 @@
+[Unit]
+Description=Freeway Pi privileged helper socket
+Documentation=file:/opt/freeway/bin/freeway-helper
+
+[Socket]
+ListenStream=/run/freeway-helper.sock
+# Root owns it, the daemon's group may connect, and nobody else on the box can
+# reach it at all. This replaces a sudoers rule: who may ask is a question of
+# group membership.
+SocketUser=root
+SocketGroup=freeway
+SocketMode=0660
+# One instance per connection, with the connection on stdin and stdout.
+Accept=yes
+
+[Install]
+WantedBy=sockets.target

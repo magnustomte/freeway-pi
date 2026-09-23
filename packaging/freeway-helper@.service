@@ -1,0 +1,14 @@
+[Unit]
+Description=Freeway Pi privileged helper
+# Not started by hand: the socket unit starts one of these per connection.
+
+[Service]
+Type=oneshot
+ExecStart=/opt/freeway/bin/freeway-helper
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+
+# A request that does not finish must not hold the socket forever. Everything
+# here either returns at once or hands the work to a transient unit.
+TimeoutStartSec=60

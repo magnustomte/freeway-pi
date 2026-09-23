@@ -1,0 +1,14 @@
+[Unit]
+Description=Freeway Pi: end a temporary ssh opening when its time is up
+
+[Timer]
+# Every minute, from a minute after boot. A minute's granularity is plenty for
+# something measured in tens of minutes, and it costs one comparison.
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+# So an opening does not outlive a box that was asleep or powered off.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

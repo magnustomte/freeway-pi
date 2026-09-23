@@ -1,0 +1,848 @@
+#!/bin/sh
+# Does the handful of things to this box that freewayd cannot do itself:
+# change the network, install pending updates, restart, and shut down.
+#
+# Reached over a unix socket, not through sudo. The daemon runs with
+# NoNewPrivileges=yes and a capability bounding set of exactly
+# CAP_NET_BIND_SERVICE, which makes sudo impossible by design — the bounding
+# set is inherited and cannot be raised, so even a successful escalation would
+# hand root none of the capabilities apt needs. Socket activation sidesteps
+# that entirely: systemd starts this as a separate root service with its own
+# bounding set, and the daemon's only privilege is permission to connect.
+#
+# The socket is root:freeway mode 0660, so who may ask is a question of group
+# membership and not of a sudoers rule.
+#
+# The protocol is one request per connection, key=value per line, ended by a
+# line holding a single dot:
+#
+#	op=apply
+#	connection=Wired connection 1
+#	dhcp=0
+#	address=192.0.2.10/24
+#	.
+#
+# Everything read here arrived over the network before it got to freewayd, so
+# every value is checked against a pattern before it is allowed near a command.
+set -eu
+
+# Root's own directory, not the daemon's state directory.
+#
+# This used to live in /var/lib/freeway, which systemd creates owned by the
+# service user because of StateDirectory=freeway — so the unprivileged daemon
+# could write a file that root then sourced, and the whole point of this
+# privilege split was one file write away from being undone.
+SAVED_DIR=/var/lib/freeway-helper
+SAVED=$SAVED_DIR/network-before
+WIFI_SAVED=$SAVED_DIR/wifi-before
+REVERT_UNIT=freeway-netrevert
+WIFI_REVERT_UNIT=freeway-wifirevert
+APT_UNIT=freeway-apt
+SSH_POLICY_FILE=$SAVED_DIR/ssh-policy
+# When a temporary opening ends, as a plain epoch second. Written down rather
+# than asked of systemd: an --on-active timer's deadline is monotonic, so the
+# realtime property is empty and the interface had nothing to count down.
+SSH_UNTIL_FILE=/run/freeway-ssh-until
+
+# Seconds since boot. The ssh deadline is kept in these rather than in wall
+# clock time, because the wall clock on a Pi is wrong until the network sets
+# it: there is no battery-backed clock, and a freshly flashed card starts from
+# whatever date the image was built. Kept in wall clock time, a thirty-minute
+# opening made from the card at first boot expired the moment the clock was
+# corrected a week forward — closing ssh on the person the card was meant to
+# let in. Time since boot does not jump, and a reboot ends the opening anyway,
+# so it is also the right unit.
+uptime_s() { cut -d. -f1 /proc/uptime; }
+
+# The deadline, in seconds since boot. A box upgraded while an opening was
+# running holds a wall clock time here, written by the version before — and
+# read as time since boot, that would not arrive for half a century, leaving
+# ssh open until the next reboot. A number that large can only be a date, so
+# it is converted: a billion seconds of uptime is thirty years.
+ssh_deadline() {
+	d=$(cat "$SSH_UNTIL_FILE" 2>/dev/null) || return 1
+	[ -n "$d" ] || return 1
+	if [ "$d" -gt 1000000000 ]; then
+		d=$(( $(uptime_s) + d - $(date +%s) ))
+	fi
+	echo "$d"
+}
+LOG=/var/log/freeway-apt.log
+# Which of the two apt jobs is running, so the interface can say "ser etter
+# oppdateringer" rather than "oppdaterer" for a job that installs nothing.
+TASK_FILE=/run/freeway-apt-task
+
+fail() {
+	# The reason goes back in the payload, which is the protocol's own way of
+	# saying no. Exiting zero keeps a bad request from marking the unit failed:
+	# systemd then tears the connection down before the answer drains, so the
+	# caller sees a reset instead of the reason, and `systemctl --failed` fills
+	# up with somebody's typo.
+	#
+	# The rest of the request is read and thrown away first. Exiting with
+	# unread bytes still queued on the socket makes the kernel answer with a
+	# reset rather than an orderly close, and the caller then sees "connection
+	# reset by peer" where the reason should have been.
+	#
+	# A code, then the reason in English, then — for the few that have one —
+	# the detail that only this side knows, all separated by tabs. The daemon
+	# looks the code up and shows the reason in the reader's own language; the
+	# card writes the English into freeway.txt.done. The reasons used to be
+	# Norwegian sentences, which the daemon passed straight to the page, so an
+	# English reader got Norwegian wherever this said no.
+	cat >/dev/null 2>&1 || true
+	echo "$1: $2${3:+: $3}" >&2
+	printf 'feil: %s\t%s' "$1" "$2"
+	if [ -n "${3:-}" ]; then
+		printf '\t%s' "$3"
+	fi
+	printf '\n'
+	exit 0
+}
+
+# --- request --------------------------------------------------------------
+
+OP=""; CONN=""; DHCP=0; ADDR=""; GW=""; DNS=""; REVERT=90; TASK=""
+SSID=""; PSK=""; COUNTRY=""; POLICY=""; MINUTES=""; KEY=""; FPR=""; USERNAME=""
+ZONE=""; SERVERS=""
+
+# Bounded: an unterminated request must not be able to spin here forever.
+lines=0
+while [ "$lines" -lt 20 ] && IFS= read -r line; do
+	lines=$((lines + 1))
+	[ "$line" = "." ] && break
+	case "$line" in
+	*=*) ;;
+	"") continue ;;
+	*) fail request.line "invalid line" ;;
+	esac
+	key=${line%%=*}
+	value=${line#*=}
+	case "$key" in
+	op) OP=$value ;;
+	connection) CONN=$value ;;
+	dhcp) DHCP=$value ;;
+	address) ADDR=$value ;;
+	gateway) GW=$value ;;
+	dns) DNS=$value ;;
+	revert) REVERT=$value ;;
+	task) TASK=$value ;;
+	ssid) SSID=$value ;;
+	psk) PSK=$value ;;
+	country) COUNTRY=$value ;;
+	policy) POLICY=$value ;;
+	minutes) MINUTES=$value ;;
+	key) KEY=$value ;;
+	user) USERNAME=$value ;;
+	zone) ZONE=$value ;;
+	servers) SERVERS=$value ;;
+	fingerprint) FPR=$value ;;
+	*) fail request.field "unknown field" "$key" ;;
+	esac
+done
+
+# A backslash in any value is refused outright, so nothing downstream has to
+# reason about what a shell might do with one. Checked here, after the whole
+# request has been read, rather than inside the loop above.
+for v in "$CONN" "$ADDR" "$GW" "$DNS" "$REVERT" "$TASK" "$SSID" "$PSK" "$COUNTRY" "$POLICY" "$MINUTES" "$KEY" "$FPR" "$USERNAME" "$ZONE" "$SERVERS"; do
+	case "$v" in
+	*\\*) fail request.char "invalid character in the request" ;;
+	esac
+done
+
+# --- validation -----------------------------------------------------------
+
+# printf, not echo. /bin/sh here is dash, whose echo expands backslash escapes:
+# `echo "eth0\n_; rm -rf /"` prints two lines, and `grep -q` is happy if any one
+# of them matches — so every check below passed for any value carrying a
+# backslash. Verified on this machine before it was changed.
+match() { printf '%s\n' "$1" | grep -qE "$2"; }
+
+valid_ip() { match "$1" '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; }
+valid_cidr() { match "$1" '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'; }
+valid_dns() {
+	[ -z "$1" ] && return 0
+	match "$1" '^([0-9]{1,3}\.){3}[0-9]{1,3}(,([0-9]{1,3}\.){3}[0-9]{1,3})*$'
+}
+# A network name and a passphrase are not ours to restrict. An SSID is up to
+# 32 bytes of very nearly anything, and a passphrase people actually chose will
+# contain the punctuation an allowlist would throw away — refusing a valid
+# network is a bug, not caution. So these check length and rule out control
+# characters, and safety comes from the two properties that actually provide
+# it: backslashes are already refused above, and every use below is a quoted
+# argument to nmcli, never a string a shell re-reads.
+valid_ssid() {
+	[ -n "$1" ] || return 1
+	[ "${#1}" -le 32 ] || return 1
+	match "$1" '^[^[:cntrl:]]+$'
+}
+valid_psk() {
+	# WPA-PSK: 8 to 63 characters, or exactly 64 hex for a raw key.
+	[ "${#1}" -ge 8 ] && [ "${#1}" -le 64 ] || return 1
+	match "$1" '^[^[:cntrl:]]+$'
+}
+valid_country() { match "$1" '^[A-Z][A-Z]$'; }
+
+# An OpenSSH public key: a type, base64, and an optional comment. Checked for
+# shape here and handed to ssh-keygen below, which is the only thing that can
+# actually say whether it is a key.
+valid_key() {
+	match "$1" '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+=*( [^[:cntrl:]]{0,200})?$'
+}
+valid_fingerprint() { match "$1" '^SHA256:[A-Za-z0-9+/]{43}$'; }
+valid_username() { match "$1" '^[a-z_][a-z0-9_-]{0,31}$'; }
+
+# A zoneinfo name, and it has to exist. Shape first so nothing odd reaches the
+# filesystem check, then the check, because the shape alone would accept
+# "Europe/Nowhere".
+valid_zone() {
+	match "$1" '^[A-Za-z][A-Za-z0-9+_-]*(/[A-Za-z0-9+_.-]+){0,2}$' &&
+		[ -f "/usr/share/zoneinfo/$1" ]
+}
+# One or more hostnames or addresses, space separated.
+valid_servers() {
+	match "$1" '^[A-Za-z0-9._:-]+( [A-Za-z0-9._:-]+)*$'
+}
+
+# Whose authorized_keys. The first login account, the way Raspberry Pi OS's own
+# userconf finds it — the daemon's own user is not a login and must not become
+# one.
+login_user() { getent passwd 1000 | cut -d: -f1; }
+authorized_keys_path() {
+	u=$(login_user)
+	[ -n "$u" ] || return 1
+	h=$(getent passwd "$u" | cut -d: -f6)
+	[ -n "$h" ] || return 1
+	printf '%s/.ssh/authorized_keys\n' "$h"
+}
+
+valid_name() {
+	# NetworkManager connection names contain spaces; anything that could
+	# carry a shell or an option is refused. The first character may not be a
+	# hyphen, so a name cannot be read as an nmcli option.
+	match "$1" '^[A-Za-z0-9_.:][A-Za-z0-9 _.:-]{0,63}$'
+}
+
+# Back to the lasting ssh setting, ending any temporary opening.
+#
+# A function because two operations need it: the minute timer when a deadline
+# passes, and anybody asking for it directly. It reads the policy rather than
+# assuming closed — somebody may have made it open while the clock ran.
+ssh_shut() {
+	rm -f "$SSH_UNTIL_FILE"
+	nft list chain inet filter ssh >/dev/null 2>&1 || { echo "no firewall"; return 0; }
+	nft flush chain inet filter ssh
+	if [ "$(cat "$SSH_POLICY_FILE" 2>/dev/null || echo open)" = open ]; then
+		nft add rule inet filter ssh accept
+	fi
+	logger -t freeway-helper "the temporary ssh opening has ended"
+	echo "closed"
+}
+
+# The first wifi interface. A Pi has at most one; naming it rather than
+# assuming wlan0 keeps this working on a box with a USB adapter instead.
+wifi_device() {
+	dev=$(nmcli -t -f DEVICE,TYPE device status | grep ':wifi$' |
+		head -n 1 | sed 's/:wifi$//')
+	[ -n "$dev" ] || return 1
+	printf '%s\n' "$dev"
+}
+
+# --- operations -----------------------------------------------------------
+
+case "$OP" in
+
+check)
+	# Proves to the daemon that the helper is reachable, and nothing else.
+	command -v nmcli >/dev/null || fail net.nonmcli "nmcli is missing"
+	echo "ok"
+	;;
+
+pending)
+	# Either kind of change: an address that may not be reachable, or a wifi
+	# network that may not exist. Both are waiting for somebody to prove they
+	# can still get here.
+	if systemctl is-active --quiet "$REVERT_UNIT.timer" ||
+		systemctl is-active --quiet "$WIFI_REVERT_UNIT.timer"; then
+		echo "pending"
+	else
+		echo "none"
+	fi
+	;;
+
+confirm)
+	systemctl stop "$REVERT_UNIT.timer" 2>/dev/null || true
+	systemctl stop "$WIFI_REVERT_UNIT.timer" 2>/dev/null || true
+	rm -f "$SAVED" "$WIFI_SAVED"
+	echo "confirmed"
+	;;
+
+revert)
+	# Called by the armed timer, and by hand when somebody wants out.
+	[ -f "$SAVED" ] || fail revert.nothing "nothing to go back to"
+
+	# Read, not sourced. This file is written by root and read by root, but
+	# sourcing it means any future mistake about where it lives or who may
+	# write there becomes arbitrary code as root. Parsing costs six lines.
+	OLD_CONN=""; OLD_METHOD=""; OLD_ADDR=""; OLD_GW=""; OLD_DNS=""
+	while IFS= read -r line; do
+		case "$line" in
+		conn=*) OLD_CONN=${line#conn=} ;;
+		method=*) OLD_METHOD=${line#method=} ;;
+		addr=*) OLD_ADDR=${line#addr=} ;;
+		gw=*) OLD_GW=${line#gw=} ;;
+		dns=*) OLD_DNS=${line#dns=} ;;
+		esac
+	done < "$SAVED"
+
+	# Checked again on the way out, against the same patterns the way in used.
+	valid_name "$OLD_CONN" || fail revert.connection "the saved connection name is invalid"
+	if [ "$OLD_METHOD" != auto ]; then
+		[ -z "$OLD_ADDR" ] || valid_cidr "$OLD_ADDR" || fail revert.address "the saved address is invalid"
+		[ -z "$OLD_GW" ] || valid_ip "$OLD_GW" || fail revert.gateway "the saved gateway is invalid"
+		valid_dns "$OLD_DNS" || fail revert.dns "the saved DNS addresses are invalid"
+	fi
+
+	if [ "$OLD_METHOD" = auto ]; then
+		nmcli connection modify id "$OLD_CONN" ipv4.method auto \
+			ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
+	else
+		nmcli connection modify id "$OLD_CONN" ipv4.method manual \
+			ipv4.addresses "$OLD_ADDR" ipv4.gateway "$OLD_GW" ipv4.dns "$OLD_DNS"
+	fi
+	nmcli connection up id "$OLD_CONN" >/dev/null
+	rm -f "$SAVED"
+	logger -t freeway-helper "reverted network settings; the change was never confirmed"
+	echo "reverted"
+	;;
+
+apply)
+	valid_name "$CONN" || fail net.connection "invalid connection name"
+	echo "$REVERT" | grep -qE '^[0-9]{2,4}$' || fail revert.invalid "invalid revert time"
+	if [ "$DHCP" != 1 ]; then
+		valid_cidr "$ADDR" || fail net.address "invalid address; expected 192.0.2.10/24"
+		[ -z "$GW" ] || valid_ip "$GW" || fail net.gateway "invalid gateway"
+		valid_dns "$DNS" || fail net.dns "invalid DNS addresses"
+	fi
+
+	# Remember what it was, before anything changes.
+	OLD_METHOD=$(nmcli -g ipv4.method connection show id "$CONN")
+	OLD_ADDR=$(nmcli -g ipv4.addresses connection show id "$CONN")
+	OLD_GW=$(nmcli -g ipv4.gateway connection show id "$CONN")
+	OLD_DNS=$(nmcli -g ipv4.dns connection show id "$CONN")
+	install -d -m 0700 -o root -g root "$SAVED_DIR"
+	umask 077
+	{
+		printf 'conn=%s\n' "$CONN"
+		printf 'method=%s\n' "$OLD_METHOD"
+		printf 'addr=%s\n' "$OLD_ADDR"
+		printf 'gw=%s\n' "$OLD_GW"
+		printf 'dns=%s\n' "$OLD_DNS"
+	} > "$SAVED"
+
+	# Armed before the change, not after: a box that becomes unreachable the
+	# instant the new settings apply still has to come back.
+	systemctl stop "$REVERT_UNIT.timer" 2>/dev/null || true
+	systemd-run --unit="$REVERT_UNIT" --on-active="$REVERT" --collect \
+		--description="Freeway Pi: revert network settings unless confirmed" \
+		/bin/sh -c "echo op=revert | $0" >/dev/null
+
+	if [ "$DHCP" = 1 ]; then
+		nmcli connection modify id "$CONN" ipv4.method auto \
+			ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
+	else
+		nmcli connection modify id "$CONN" ipv4.method manual \
+			ipv4.addresses "$ADDR" ipv4.gateway "$GW" ipv4.dns "$DNS"
+	fi
+	# Backgrounded: bringing the connection up drops the one this request
+	# arrived on, and waiting for nmcli means never answering.
+	( exec >/dev/null 2>&1; sleep 1; nmcli connection up id "$CONN" ) &
+
+	logger -t freeway-helper "applied network settings; reverting in ${REVERT}s unless confirmed"
+	echo "changed; reverts in ${REVERT}s unless confirmed"
+	;;
+
+wifi-radio)
+	# NetworkManager has its own software switch, separate from rfkill and
+	# separate from the hardware. A box whose radio was switched off once shows
+	# wlan0 as "unavailable" with the hardware perfectly fine, and every scan
+	# comes back empty.
+	nmcli radio wifi on >/dev/null 2>&1 || fail wifi.radio.failed "could not switch the radio on"
+	logger -t freeway-helper "wifi radio switched on"
+	echo "ok"
+	;;
+
+wifi-scan)
+	dev=$(wifi_device) || fail wifi.nodevice "found no wireless device"
+	[ "$(nmcli -t -f WIFI radio 2>/dev/null)" = "enabled" ] ||
+		fail wifi.radio.off "the radio is switched off"
+	# --rescan yes so the list is what is in the air now, not what was in the
+	# air when NetworkManager last looked. It costs a few seconds.
+	nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list ifname "$dev" --rescan yes
+	;;
+
+wifi-country)
+	valid_country "$COUNTRY" || fail wifi.country "invalid country code"
+	# Bookworm ships the radio rfkill-blocked until a country is set, because
+	# which channels are legal depends on where the box is standing. Without
+	# this the scan below simply returns nothing, which looks like broken
+	# hardware rather than like a question nobody answered.
+	if command -v raspi-config >/dev/null; then
+		raspi-config nonint do_wifi_country "$COUNTRY" >/dev/null 2>&1 || true
+	fi
+	iw reg set "$COUNTRY" >/dev/null 2>&1 || true
+	rfkill unblock wifi >/dev/null 2>&1 || true
+	nmcli radio wifi on >/dev/null 2>&1 || true
+	logger -t freeway-helper "wifi country set to $COUNTRY"
+	echo "ok"
+	;;
+
+wifi-connect)
+	valid_ssid "$SSID" || fail wifi.ssid "invalid network name"
+	[ -z "$PSK" ] || valid_psk "$PSK" || fail wifi.psk "the passphrase must be between 8 and 63 characters"
+	echo "$REVERT" | grep -qE '^[0-9]{2,4}$' || fail revert.invalid "invalid revert time"
+
+	dev=$(wifi_device) || fail wifi.nodevice "found no wireless device"
+	rfkill unblock wifi >/dev/null 2>&1 || true
+	# Joining a network implies wanting the radio on; refusing here because a
+	# switch is off would be pedantry, not safety.
+	nmcli radio wifi on >/dev/null 2>&1 || true
+
+	# Only a box that is *on* wifi can be lost by changing wifi. Set this up
+	# over the cable and the worst case is that it does not join; do it over
+	# the air and the worst case is a box in a cupboard with no way back.
+	OLD_WIFI=$(nmcli -t -f NAME,TYPE connection show --active |
+		grep ':802-11-wireless$' | head -n 1 | sed 's/:802-11-wireless$//' || true)
+
+	EXISTED=0
+	if nmcli -t -f NAME connection show | grep -qxF "$SSID"; then
+		EXISTED=1
+	fi
+
+	if [ -n "$OLD_WIFI" ]; then
+		install -d -m 0700 -o root -g root "$SAVED_DIR"
+		umask 077
+		{
+			printf 'conn=%s\n' "$OLD_WIFI"
+			printf 'new=%s\n' "$SSID"
+			printf 'existed=%s\n' "$EXISTED"
+		} > "$WIFI_SAVED"
+		systemctl stop "$WIFI_REVERT_UNIT.timer" 2>/dev/null || true
+		systemd-run --unit="$WIFI_REVERT_UNIT" --on-active="$REVERT" --collect \
+			--description="Freeway Pi: revert the wifi network unless confirmed" \
+			/bin/sh -c "echo op=wifi-revert | $0" >/dev/null
+	fi
+
+	# nmcli rather than a hand-written keyfile: the passphrase is on the
+	# command line for the instant this runs, which anything already able to
+	# read /proc on this box could catch — but a keyfile written by hand is a
+	# format we would be guessing at, and a wifi client that does not connect
+	# is worse than one that connects observably. The daemon never sees the
+	# passphrase again: nothing reads it back out.
+	if [ -n "$PSK" ]; then
+		out=$(nmcli device wifi connect "$SSID" password "$PSK" ifname "$dev" 2>&1) || {
+			[ "$EXISTED" = 0 ] && nmcli connection delete id "$SSID" >/dev/null 2>&1
+			systemctl stop "$WIFI_REVERT_UNIT.timer" 2>/dev/null || true
+			rm -f "$WIFI_SAVED"
+			fail wifi.join "could not join the network" "$(printf '%s' "$out" | tail -n 1)"
+		}
+	else
+		out=$(nmcli device wifi connect "$SSID" ifname "$dev" 2>&1) || {
+			[ "$EXISTED" = 0 ] && nmcli connection delete id "$SSID" >/dev/null 2>&1
+			systemctl stop "$WIFI_REVERT_UNIT.timer" 2>/dev/null || true
+			rm -f "$WIFI_SAVED"
+			fail wifi.join "could not join the network" "$(printf '%s' "$out" | tail -n 1)"
+		}
+	fi
+
+	# Power saving off, on the profile so it survives reconnecting.
+	#
+	# Measured on the box: with it on, a ping over an otherwise excellent link
+	# (-40 dBm, 433 Mbit/s) ran 4.8–228 ms and averaged 117; with it off, 1.5–7.2
+	# and averaged 4.4. The radio parks itself between packets. It never shows
+	# in the median of a Modbus read, because the RS-485 round trip is ~97 ms
+	# and swamps it — it shows up as a client that times out now and then for
+	# no reason anybody can see. A box whose job is answering promptly should
+	# not be asleep.
+	nmcli connection modify id "$SSID" wifi.powersave 2 >/dev/null 2>&1 || true
+
+	if [ -n "$OLD_WIFI" ]; then
+		logger -t freeway-helper "joined a wifi network; reverting in ${REVERT}s unless confirmed"
+		echo "connected; reverts in ${REVERT}s unless confirmed"
+	else
+		logger -t freeway-helper "joined a wifi network"
+		echo "connected"
+	fi
+	;;
+
+wifi-revert)
+	[ -f "$WIFI_SAVED" ] || fail revert.nothing "nothing to go back to"
+	OLD_CONN=""; NEW_SSID=""; EXISTED=1
+	while IFS= read -r line; do
+		case "$line" in
+		conn=*) OLD_CONN=${line#conn=} ;;
+		new=*) NEW_SSID=${line#new=} ;;
+		existed=*) EXISTED=${line#existed=} ;;
+		esac
+	done < "$WIFI_SAVED"
+	valid_ssid "$OLD_CONN" || fail revert.ssid "the saved network name is invalid"
+
+	nmcli connection down id "$NEW_SSID" >/dev/null 2>&1 || true
+	# A profile we made and that did not work is rubbish; one that was already
+	# here is somebody else's and stays.
+	[ "$EXISTED" = 0 ] && nmcli connection delete id "$NEW_SSID" >/dev/null 2>&1
+	nmcli connection up id "$OLD_CONN" >/dev/null 2>&1 || true
+	rm -f "$WIFI_SAVED"
+	logger -t freeway-helper "reverted the wifi network; the change was never confirmed"
+	echo "reverted"
+	;;
+
+wifi-forget)
+	valid_ssid "$SSID" || fail wifi.ssid "invalid network name"
+	nmcli -t -f NAME,TYPE connection show | grep -qxF "$SSID:802-11-wireless" ||
+		fail wifi.unknown "unknown network"
+	nmcli connection delete id "$SSID" >/dev/null || fail wifi.forget.failed "could not delete the network"
+	logger -t freeway-helper "forgot a wifi network"
+	echo "deleted"
+	;;
+
+# power-log returns only the kernel's own words about the supply.
+#
+# freewayd runs with ProtectKernelLogs=yes and cannot read /dev/kmsg itself,
+# which is the point: the kernel log carries addresses that would help anybody
+# who got that far. Only the two phrases the voltage monitor uses come back,
+# so nothing else the kernel has said crosses the boundary.
+power-log)
+	dmesg 2>/dev/null |
+		grep -E 'Undervoltage detected!|Voltage normalised' |
+		while IFS= read -r l; do
+			echo "line=$l"
+		done
+	;;
+
+time-status)
+	echo "timezone=$(timedatectl show -p Timezone --value 2>/dev/null)"
+	echo "ntp=$(timedatectl show -p NTP --value 2>/dev/null)"
+	echo "synchronised=$(timedatectl show -p NTPSynchronized --value 2>/dev/null)"
+	echo "now=$(date -Is)"
+	# What is configured, and what it actually reached — a server nobody can
+	# resolve looks identical to a working one until you ask the second
+	# question.
+	configured=$(sed -n 's/^ *NTP= *//p' /etc/systemd/timesyncd.conf 2>/dev/null | tail -1)
+	echo "servers=$configured"
+	echo "server_now=$(timedatectl show-timesync -p ServerName --value 2>/dev/null)"
+	;;
+
+time-zone)
+	valid_zone "$ZONE" || fail time.zone.unknown "unknown timezone"
+	old=$(timedatectl show -p Timezone --value 2>/dev/null || true)
+	timedatectl set-timezone "$ZONE" || fail time.zone.failed "could not set the timezone"
+	logger -t freeway-helper "timezone set to $ZONE"
+
+	# The daemon has to start again to see it. Go reads the timezone once, when
+	# a program starts, so freewayd carried on in the old zone — and the advice
+	# on the page, "correct the timezone, then set the unit's clock", wrote the
+	# old zone's time into the unit, the one clock that had been right. Its
+	# reboot time and its log were in the old zone too.
+	#
+	# A few seconds on, in a unit of its own: the daemon asked for this and is
+	# waiting for the answer, and a restart from inside this request would take
+	# the answer down with it. Only when the zone actually changed.
+	if [ "$old" != "$ZONE" ]; then
+		systemd-run --collect --no-block \
+			--description="Freeway Pi: start again in the new timezone" \
+			/bin/sh -c 'sleep 3; systemctl restart freewayd.service' >/dev/null 2>&1 || true
+		echo "restarting"
+	else
+		echo "unchanged"
+	fi
+	;;
+
+time-ntp)
+	# Empty means the distribution's own pool, which is the right default and
+	# the right thing to go back to.
+	if [ -n "$SERVERS" ]; then
+		valid_servers "$SERVERS" || fail time.servers "invalid list of time servers"
+	fi
+	conf=/etc/systemd/timesyncd.conf
+	[ -f "$conf" ] || fail time.nontp "systemd-timesyncd is not in use on this box"
+
+	# Rewritten rather than appended to, so setting this twice does not leave
+	# two NTP= lines with the first one winning.
+	tmp=$conf.new
+	grep -vE '^ *NTP=' "$conf" > "$tmp"
+	[ -n "$SERVERS" ] && printf 'NTP=%s\n' "$SERVERS" >> "$tmp"
+	chmod 644 "$tmp"
+	mv "$tmp" "$conf"
+
+	systemctl restart systemd-timesyncd 2>/dev/null || true
+	timedatectl set-ntp true 2>/dev/null || true
+	logger -t freeway-helper "ntp servers set"
+	echo "${SERVERS:-default}"
+	;;
+
+ssh-rename)
+	# Renames the login account, the way Raspberry Pi OS's own userconf does:
+	# the image ships one account and whoever flashes it may want their own
+	# name on it. The daemon's service user is not touched and could not be —
+	# it is not uid 1000 and this only ever moves that one.
+	valid_username "$USERNAME" || fail account.name "invalid user name"
+	old=$(login_user)
+	[ -n "$old" ] || fail account.missing "found no login account"
+	[ "$old" != "$USERNAME" ] || { echo "already called that"; exit 0; }
+	getent passwd "$USERNAME" >/dev/null && fail account.taken "the user name is taken"
+
+	usermod -l "$USERNAME" "$old" || fail account.rename.failed "could not rename the account"
+	usermod -m -d "/home/$USERNAME" "$USERNAME" 2>/dev/null || true
+	groupmod -n "$USERNAME" "$old" 2>/dev/null || true
+	for f in /etc/subuid /etc/subgid; do
+		[ -f "$f" ] && sed -i "s/^$old:/$USERNAME:/" "$f"
+	done
+	for f in /etc/sudoers.d/*; do
+		[ -f "$f" ] && sed -i "s/^$old /$USERNAME /" "$f"
+	done
+	logger -t freeway-helper "the login account was renamed"
+	echo "$USERNAME"
+	;;
+
+ssh-keys)
+	# Fingerprints, never the keys. A public key is not a secret, but there is
+	# no reason for the interface to carry one back and nothing it could do
+	# with it.
+	f=$(authorized_keys_path) || { echo "user="; exit 0; }
+	echo "user=$(login_user)"
+	[ -s "$f" ] || exit 0
+	while IFS= read -r line; do
+		case "$line" in ''|\#*) continue ;; esac
+		printf '%s\n' "$line" > /tmp/.fwkey.$$
+		# "256 SHA256:xxx a comment (ED25519)", except that a key with no
+		# comment gets the two words "no comment" there instead — so the type
+		# is the last field and the comment is whatever lies between, rather
+		# than fixed positions that shift under a key nobody named.
+		ssh-keygen -lf /tmp/.fwkey.$$ 2>/dev/null | awk '{
+			c = ""
+			for (i = 3; i < NF; i++) c = c (c == "" ? "" : " ") $i
+			print "key=" $2 " " $NF " " c
+		}'
+		rm -f /tmp/.fwkey.$$
+	done < "$f"
+	;;
+
+ssh-key-add)
+	valid_key "$KEY" || fail ssh.key.invalid "that does not look like a public ssh key"
+	u=$(login_user); [ -n "$u" ] || fail account.missing "found no login account"
+	f=$(authorized_keys_path) || fail account.missing "found no login account"
+
+	printf '%s\n' "$KEY" > /tmp/.fwkey.$$
+	ssh-keygen -lf /tmp/.fwkey.$$ >/dev/null 2>&1 || {
+		rm -f /tmp/.fwkey.$$
+		fail ssh.key.unreadable "the key could not be read"
+	}
+	rm -f /tmp/.fwkey.$$
+
+	install -d -m 0700 -o "$u" -g "$u" "$(dirname "$f")"
+	touch "$f"
+	chmod 0600 "$f"
+	chown "$u:$u" "$f"
+	# Idempotent: adding the same key twice is somebody being careful, not an
+	# error, and two identical lines would list as two keys.
+	if grep -qxF "$KEY" "$f"; then
+		echo "the key is already there"
+		exit 0
+	fi
+	printf '%s\n' "$KEY" >> "$f"
+	logger -t freeway-helper "an ssh key was added for $u"
+	echo "added"
+	;;
+
+ssh-key-remove)
+	valid_fingerprint "$FPR" || fail ssh.fingerprint "invalid fingerprint"
+	f=$(authorized_keys_path) || fail account.missing "found no login account"
+	[ -s "$f" ] || fail ssh.key.none "there are no keys to remove"
+
+	tmp=$f.new
+	: > "$tmp"
+	chmod 0600 "$tmp"
+	found=0
+	while IFS= read -r line; do
+		case "$line" in ''|\#*) printf '%s\n' "$line" >> "$tmp"; continue ;; esac
+		printf '%s\n' "$line" > /tmp/.fwkey.$$
+		this=$(ssh-keygen -lf /tmp/.fwkey.$$ 2>/dev/null | awk '{print $2}')
+		rm -f /tmp/.fwkey.$$
+		if [ "$this" = "$FPR" ]; then
+			found=1
+		else
+			printf '%s\n' "$line" >> "$tmp"
+		fi
+	done < "$f"
+	[ "$found" = 1 ] || { rm -f "$tmp"; fail ssh.key.notfound "found no key with that fingerprint"; }
+	chown "$(login_user):$(login_user)" "$tmp"
+	mv "$tmp" "$f"
+	logger -t freeway-helper "an ssh key was removed"
+	echo "removed"
+	;;
+
+ssh-status)
+	# Three things the interface has to tell apart: no firewall at all (ssh is
+	# reachable and nothing here can change that), closed, and open — and for
+	# a timed open, when it closes again.
+	if ! nft list chain inet filter ssh >/dev/null 2>&1; then
+		echo "firewall=no"
+		echo "policy=open"
+		exit 0
+	fi
+	echo "firewall=yes"
+	echo "policy=$(cat "$SSH_POLICY_FILE" 2>/dev/null || echo open)"
+	if nft list chain inet filter ssh 2>/dev/null | grep -q accept; then
+		echo "reachable=yes"
+	else
+		echo "reachable=no"
+	fi
+	# The interface counts down to a time of day, so it gets one — worked out
+	# from the seconds left each time it asks, which keeps it right after the
+	# clock has been corrected.
+	if deadline=$(ssh_deadline); then
+		echo "until=$(( $(date +%s) + deadline - $(uptime_s) ))"
+	fi
+	;;
+
+ssh-policy)
+	# The lasting answer: written to the file harden.sh reads, and applied to
+	# the running ruleset so it takes effect without rebuilding the firewall.
+	case "$POLICY" in
+	open|closed) ;;
+	*) fail ssh.policy.unknown "unknown ssh setting" ;;
+	esac
+	nft list chain inet filter ssh >/dev/null 2>&1 || fail firewall.off "the firewall is not in use"
+
+	install -d -m 0700 -o root -g root "$SAVED_DIR"
+	printf '%s\n' "$POLICY" > "$SSH_POLICY_FILE"
+
+	# A lasting answer cancels a temporary one, whichever way it points.
+	rm -f "$SSH_UNTIL_FILE"
+	nft flush chain inet filter ssh
+	[ "$POLICY" = open ] && nft add rule inet filter ssh accept
+
+	# Nothing is written to /etc/nftables.conf. Editing a live rule file with
+	# sed is how a firewall quietly stops meaning what it says, and there is no
+	# need: the policy file above is the single source of truth, and
+	# freeway-ssh-policy.service applies it at boot once nftables has loaded.
+
+	logger -t freeway-helper "ssh is now $POLICY"
+	echo "$POLICY"
+	;;
+
+ssh-open)
+	# Temporary on purpose: applied to the running ruleset and never written to
+	# disk, so a reboot returns to whatever was decided rather than to whatever
+	# somebody needed for ten minutes one evening.
+	echo "$MINUTES" | grep -qE '^[0-9]{1,4}$' || fail ssh.minutes "invalid number of minutes"
+	[ "$MINUTES" -ge 1 ] && [ "$MINUTES" -le 1440 ] || fail ssh.minutes.range "choose between 1 and 1440 minutes"
+	nft list chain inet filter ssh >/dev/null 2>&1 || fail firewall.off "the firewall is not in use"
+
+	nft flush chain inet filter ssh
+	nft add rule inet filter ssh accept
+
+	# A deadline in a file, checked by an installed timer — not a transient
+	# unit from systemd-run.
+	#
+	# The transient version failed in practice: the .service it creates lives
+	# in /run and had vanished by the time its own timer fired, leaving
+	# "Failed to open /run/systemd/transient/freeway-sshclose.service" and ssh
+	# open with nothing left to close it. A mechanism whose only job is letting
+	# somebody back in cannot be the fragile part. This survives daemon-reload,
+	# and a reboot ends the opening anyway because the boot unit reapplies the
+	# lasting setting.
+	echo "$(( $(uptime_s) + MINUTES * 60 ))" > "$SSH_UNTIL_FILE"
+	chmod 644 "$SSH_UNTIL_FILE"
+	logger -t freeway-helper "ssh opened for ${MINUTES}m"
+	echo "open for ${MINUTES} minutes"
+	;;
+
+ssh-expire)
+	# Runs every minute. Does nothing unless a deadline has passed, which is
+	# the normal case on all but one minute of the day.
+	deadline=$(ssh_deadline) || { echo "nothing to close"; exit 0; }
+	[ "$(uptime_s)" -ge "$deadline" ] || { echo "not yet"; exit 0; }
+	ssh_shut
+	;;
+
+ssh-shut)
+	ssh_shut
+	;;
+
+apt)
+	# One unit for both apt jobs, on purpose: apt takes a lock, so a list
+	# refresh started while an upgrade runs would simply fail. One unit makes
+	# them mutually exclusive by construction rather than by checking.
+	#
+	# Started as a transient unit rather than run here. Either job takes
+	# minutes; holding the request open that long would time out in the browser
+	# and leave nobody able to say whether it worked. This returns at once and
+	# apt-status reports how it went. It also has to survive freewayd being
+	# restarted by an upgrade of its own dependencies.
+	case "$TASK" in
+	refresh|upgrade) ;;
+	*) fail apt.task.unknown "unknown task" ;;
+	esac
+	if systemctl is-active --quiet "$APT_UNIT.service"; then
+		fail apt.busy "apt is already busy"
+	fi
+
+	if [ "$TASK" = refresh ]; then
+		body='
+			echo "--- $(date -Is) apt-get update"
+			apt-get update
+			echo "--- $(date -Is) done"
+		'
+	else
+		body='
+			echo "--- $(date -Is) apt-get update"
+			apt-get update
+			echo "--- $(date -Is) apt-get upgrade"
+			apt-get -y \
+				-o Dpkg::Options::=--force-confdef \
+				-o Dpkg::Options::=--force-confold \
+				upgrade
+			echo "--- $(date -Is) done"
+		'
+	fi
+
+	: > "$LOG"
+	chmod 644 "$LOG"
+	printf '%s\n' "$TASK" > "$TASK_FILE"
+	chmod 644 "$TASK_FILE"
+	systemd-run --unit="$APT_UNIT" --collect \
+		--description="Freeway Pi: apt $TASK" \
+		--setenv=DEBIAN_FRONTEND=noninteractive \
+		/bin/sh -c "exec >>'$LOG' 2>&1
+$body" >/dev/null
+	logger -t freeway-helper "started apt $TASK on request"
+	echo "started"
+	;;
+
+apt-status)
+	state=$(systemctl is-active "$APT_UNIT.service" 2>/dev/null || true)
+	code=$(systemctl show -p ExecMainStatus --value "$APT_UNIT.service" 2>/dev/null || echo "")
+	echo "task=$(cat "$TASK_FILE" 2>/dev/null || true)"
+	echo "state=$state"
+	echo "code=${code:-0}"
+	echo "---"
+	[ -f "$LOG" ] && tail -c 4000 "$LOG" || true
+	;;
+
+reboot|poweroff)
+	# Two seconds late, so the answer to the request that asked for it gets
+	# out before the network goes away.
+	systemd-run --on-active=2 --unit="freeway-$OP" --collect \
+		--description="Freeway Pi: $OP on request" \
+		systemctl "$OP" >/dev/null
+	logger -t freeway-helper "$OP on request, in two seconds"
+	echo "ok"
+	;;
+
+*)
+	fail op.unknown "unknown operation"
+	;;
+esac
+exit 0

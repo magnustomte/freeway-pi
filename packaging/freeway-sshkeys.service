@@ -1,0 +1,29 @@
+[Unit]
+Description=Freeway Pi: make sure this box has its own ssh host keys
+Documentation=man:ssh-keygen(1)
+# Raspberry Pi OS regenerates host keys with ConditionFirstBoot=yes, which is
+# true exactly once — when /etc/machine-id is still empty. The image ships with
+# no host keys, deliberately, because an image that carried them would hand
+# every box that flashed it the same identity. So if that one boot is
+# interrupted — a brownout, a pulled plug — machine-id is already populated,
+# the condition is false for ever, and sshd can never start again. Seen on a
+# Pi whose power supply sagged during its first boot.
+#
+# Generating the keys is our responsibility because deleting them was. This has
+# no first-boot condition and runs whenever they are missing; ssh-keygen -A
+# only creates what is not there, so it costs nothing on every later boot.
+Before=ssh.service sshd.service
+After=systemd-remount-fs.service
+ConditionPathIsReadWrite=/etc
+ConditionFileIsExecutable=/usr/bin/ssh-keygen
+DefaultDependencies=no
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/ssh-keygen -A
+
+[Install]
+WantedBy=sysinit.target

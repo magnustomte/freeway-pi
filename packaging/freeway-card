@@ -1,0 +1,233 @@
+#!/bin/sh
+# Reads instructions somebody left on the boot partition, once, at boot.
+#
+# This is the way back in when there is no way in. The box sits in a room with
+# no ethernet socket, on wifi; the router is replaced or the passphrase
+# changes, and now it has no network — and the page that configures wifi is
+# reachable only over the network it has lost. The same knot ties itself if
+# ssh has been closed and freewayd will not start: there is no button left to
+# press.
+#
+# The boot partition is FAT. Any laptop can mount it. So: take the card out,
+# write what the box needs to know, put it back, power on.
+#
+#   /boot/firmware/freeway.txt
+#
+#       wifi-ssid=MyNetwork
+#       wifi-psk=a good long passphrase
+#       wifi-country=NO
+#       timezone=Europe/Oslo
+#       ssh=30
+#       ssh-user=yourname                       renames the login account
+#       ssh-key=<the whole line from your id_ed25519.pub>
+#       pin=1234
+#
+# Requiring physical possession of the card is the whole security model, and
+# it is the right one: whoever holds the card already has everything on it.
+#
+# The file is consumed. It is read once, acted on, and replaced by
+# freeway.txt.done — which carries the result and NOT the passphrase, so the
+# answer is readable from the same laptop without leaving a secret in clear
+# text on a partition anybody can mount.
+set -eu
+
+HELPER=/opt/freeway/bin/freeway-helper
+
+# Bookworm moved it; older images and some setups still use the old path.
+#
+# freeway.txt.txt as well, because that is what Windows makes of freeway.txt
+# when file extensions are hidden, which they are by default: the person sees
+# "freeway.txt", the card holds "freeway.txt.txt", and nothing happens with no
+# way to tell why. Case does not matter; the partition is FAT.
+for dir in /boot/firmware /boot; do
+	for name in freeway.txt freeway.txt.txt; do
+		[ -f "$dir/$name" ] && { CARD="$dir/$name"; break 2; }
+	done
+done
+[ -n "${CARD:-}" ] || exit 0
+
+# Always the same answer file, whichever name the question came under.
+DONE="${CARD%/*}/freeway.txt.done"
+BOM=$(printf '\357\273\277')
+say() { echo "$1"; RESULT="${RESULT:-}$1
+"; }
+
+RESULT=""
+SSID=""; PSK=""; COUNTRY=""; SSH=""; PIN=""; SSHKEY=""; SSHUSER=""; ZONE=""
+
+# Read first, act second. A file with a typo in the middle should not leave the
+# box half-configured with no way to say so.
+while IFS= read -r line || [ -n "$line" ]; do
+	# Tolerant about what a person types on a laptop at arm's length: comments,
+	# blank lines, stray carriage returns from a Windows editor, spaces around
+	# the equals sign.
+	line=$(printf '%s' "$line" | tr -d '\r')
+	# A byte-order mark: three invisible bytes Notepad can put before the
+	# first line. Left there, they turn the first key — often ssh-key — into
+	# one nothing recognises.
+	line=${line#"$BOM"}
+	case "$line" in ''|'#'*) continue ;; esac
+	key=$(printf '%s' "${line%%=*}" | tr -d ' ')
+	value=${line#*=}
+	value=${value# }
+	case "$key" in
+	wifi-ssid) SSID=$value ;;
+	wifi-psk) PSK=$value ;;
+	wifi-country) COUNTRY=$value ;;
+	ssh) SSH=$value ;;
+	pin) PIN=$value ;;
+	ssh-key) SSHKEY=$value ;;
+	ssh-user) SSHUSER=$value ;;
+	timezone) ZONE=$value ;;
+	*) say "ignored unknown setting: $key" ;;
+	esac
+done < "$CARD"
+
+# Gone before anything else happens. If this script dies halfway, or the box
+# loses power mid-boot, the passphrase must not still be sitting there in clear
+# text waiting for the next person to pick the card up.
+rm -f "$CARD"
+
+ask() {
+	op=$1
+	shift
+	answer=$(
+		{
+			printf 'op=%s\n' "$op"
+			for f in "$@"; do printf '%s\n' "$f"; done
+			printf '.\n'
+		} | "$HELPER" 2>&1
+	) || true
+	case "$answer" in
+	"feil: "*)
+		# A code, the reason in English and sometimes a detail, separated by
+		# tabs. The reason is what a person reading this file wants; the code
+		# is for the daemon.
+		why=${answer#feil: }
+		reason=$(printf '%s' "$why" | cut -f2)
+		detail=$(printf '%s' "$why" | cut -f3)
+		# An answer in the older form has no tabs, and is the reason as it is.
+		case "$why" in *"	"*) ;; *) reason=$why; detail="" ;; esac
+		say "$op: $reason${detail:+: $detail}"
+		return 1
+		;;
+	esac
+	say "$op: $answer"
+	return 0
+}
+
+# The timezone first: it is what the unit's clock gets set from, and a box on
+# the image's default writes an hour's error into every timer programme.
+if [ -n "$ZONE" ]; then
+	ask time-zone "zone=$ZONE" || true
+fi
+
+if [ -n "$COUNTRY" ]; then
+	ask wifi-country "country=$COUNTRY" || true
+fi
+
+if [ -n "$SSID" ]; then
+	# revert=0 would be refused by the helper's pattern, and arming one here
+	# would be pointless anyway: nobody is holding a browser open to confirm a
+	# change made by putting a card in.
+	ask wifi-connect "ssid=$SSID" "psk=$PSK" "revert=90" || true
+	# And immediately confirmed, for the same reason. The card IS the
+	# confirmation — somebody with physical access asked for this.
+	ask confirm || true
+fi
+
+# The name before the key, or the key lands on an account that is about to be
+# called something else.
+if [ -n "$SSHUSER" ]; then
+	ask ssh-rename "user=$SSHUSER" || true
+fi
+
+# The key before the port, so that opening it is never the thing that happens
+# without a way to walk through it.
+if [ -n "$SSHKEY" ]; then
+	ask ssh-key-add "key=$SSHKEY" || true
+	say "ssh: log in as $(getent passwd 1000 | cut -d: -f1)"
+fi
+
+case "$SSH" in
+'') ;;
+permanent|open) ask ssh-policy "policy=open" || true ;;
+closed) ask ssh-policy "policy=closed" || true ;;
+*[!0-9]*) say "ssh: expected a number of minutes, 'permanent' or 'closed', not '$SSH'" ;;
+*) ask ssh-open "minutes=$SSH" || true ;;
+esac
+
+# An open port with nobody able to walk through it is worth saying out loud —
+# on the partition the request came from, where whoever wrote it will look.
+if [ -n "$SSH" ] && [ "$SSH" != closed ]; then
+	if ! printf 'op=ssh-keys\n.\n' | "$HELPER" 2>/dev/null | grep -q '^key='; then
+		say "ssh: the port is open but no key is installed, so nobody can log in — add ssh-key=..."
+	fi
+fi
+
+# Wait for an address before writing the answer.
+#
+# systemd's After=NetworkManager.service means "started", not "has an IP", and
+# on the first run this wrote the answer before an address had been assigned,
+# leaving empty the one line somebody reading this on a laptop actually needs. Twenty seconds is long enough for DHCP on a link that works and short
+# enough not to hold up a boot on one that does not.
+ADDRESSES=""
+n=0
+while [ "$n" -lt 20 ]; do
+	ADDRESSES=$(ip -4 -br addr show 2>/dev/null | grep -v '^lo' | grep -v 'UP *$' || true)
+	[ -n "$ADDRESSES" ] && break
+	n=$((n + 1))
+	sleep 1
+done
+[ -n "$ADDRESSES" ] || ADDRESSES="(no address yet — check the cable or the wifi settings above)"
+
+# The PIN is handed to the daemon rather than applied here.
+#
+# Setting it means PBKDF2 at a hundred and twenty thousand iterations against a
+# fresh salt, which is not a thing to reimplement in /bin/sh. So this carries it
+# the few metres from the card to a file the daemon reads once at startup, and
+# then forgets it. Root-owned, readable by the daemon's group, and deleted by
+# the daemon the moment it has been used.
+#
+# No old PIN is required, and that is the point: somebody who has taken the
+# card out of the box has physical possession, which is a stronger claim than
+# any PIN. It is why this path exists and why it is not reachable over the
+# network.
+if [ -n "$PIN" ]; then
+	case "$PIN" in
+	*[!0-9]*) say "pin: expected digits only" ;;
+	*)
+		if [ "${#PIN}" -lt 4 ] || [ "${#PIN}" -gt 12 ]; then
+			say "pin: expected between 4 and 12 digits"
+		else
+			umask 027
+			printf '%s' "$PIN" > /run/freeway-pin-reset
+			chown root:freeway /run/freeway-pin-reset 2>/dev/null || true
+			chmod 0640 /run/freeway-pin-reset
+			say "pin: will be set when the daemon starts"
+		fi
+		;;
+	esac
+fi
+
+# The answer, on the partition the question came from. No passphrase.
+# When it was read — if the clock knows. A Pi has no battery-backed clock, and
+# at first boot this runs before the network has set it, so the date is the
+# day the image was built. The card cannot wait for the network: it is the way
+# back in when the network is what is broken. So it says which it is.
+if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = yes ]; then
+	WHEN="at $(date -Is)"
+else
+	WHEN="at boot, before the clock had been set from the network,"
+fi
+{
+	echo "# Freeway Pi read freeway.txt $WHEN and acted on it."
+	echo "# The file was deleted; this is what happened. Neither the wifi"
+	echo "# passphrase nor the PIN appears below."
+	echo
+	printf '%s' "$RESULT"
+	echo
+	echo "# Address now:"
+	echo "$ADDRESSES" | sed 's/^/#   /'
+} > "$DONE" 2>/dev/null || true
+sync

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title data-i18n="ui.title.overview">Freeway Pi</title>
+<meta name="theme-color" content="#0f1720" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+<!-- The legacy Apple tag, not the manifest, is what opens the home-screen icon
+     without Safari's chrome. It works over plain HTTP, unlike a service worker,
+     which is why the interface does not depend on one. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Freeway Pi">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<script src="api/lang.js"></script>
+<script src="i18n.js"></script>
+<script src="theme.js"></script>
+<script src="link.js"></script>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true">
+  <!-- The three the original Freeway WEB adapter draws beside the unit, redrawn
+       as vectors: a recycle loop, a snowflake, and rising heat. Its own are
+       40-pixel bitmaps that blur on a phone and cannot follow the theme. -->
+  <symbol id="i-recovery" viewBox="0 0 24 24">
+    <path d="M13.9 5.3A7 7 0 0 1 19.0 12.5M16.9 17.0A7 7 0 0 1 8.1 17.8M5.2 13.7A7 7 0 0 1 8.9 5.7"
+          fill="none" stroke="currentColor" stroke-width="2.2"/>
+    <path d="M21.9 12.3L18.3 15.0L16.1 12.1ZM6.8 20.4L6.3 16.0L9.8 15.5ZM7.4 3.3L11.4 5.0L10.1 8.4Z"
+          fill="currentColor"/>
+  </symbol>
+  <!-- Three rising curves, not two: the original has three, and at this size
+       the count is most of what tells it apart from the fan. -->
+  <symbol id="i-heating" viewBox="0 0 24 24">
+    <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M5 20.5c-2.2-2.2-2.2-4.4 0-6.6s2.2-4.4 0-6.6"/>
+      <path d="M12 20.5c-2.2-2.2-2.2-4.4 0-6.6s2.2-4.4 0-6.6"/>
+      <path d="M19 20.5c-2.2-2.2-2.2-4.4 0-6.6s2.2-4.4 0-6.6"/>
+    </g>
+  </symbol>
+  <!-- Six arms, each with a pair of barbs, as a snowflake actually has. The
+       one this replaces had barbs on two arms of six. -->
+  <symbol id="i-cooling" viewBox="0 0 24 24">
+    <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+      <path d="M12 12V2.8M12 6.4l-2.6-2.6M12 6.4l2.6-2.6"/>
+      <path d="M12 12V2.8M12 6.4l-2.6-2.6M12 6.4l2.6-2.6" transform="rotate(60 12 12)"/>
+      <path d="M12 12V2.8M12 6.4l-2.6-2.6M12 6.4l2.6-2.6" transform="rotate(120 12 12)"/>
+      <path d="M12 12V2.8M12 6.4l-2.6-2.6M12 6.4l2.6-2.6" transform="rotate(180 12 12)"/>
+      <path d="M12 12V2.8M12 6.4l-2.6-2.6M12 6.4l2.6-2.6" transform="rotate(240 12 12)"/>
+      <path d="M12 12V2.8M12 6.4l-2.6-2.6M12 6.4l2.6-2.6" transform="rotate(300 12 12)"/>
+    </g>
+    <circle cx="12" cy="12" r="1.7" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-defrost" viewBox="0 0 24 24">
+    <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M12 2v11M6.8 5.5l10.4 6M17.2 5.5l-10.4 6"/>
+      <path d="M12 16c1.8 2 2.8 3.2 2.8 4.3A2.8 2.8 0 0 1 12 23a2.8 2.8 0 0 1-2.8-2.7c0-1.1 1-2.3 2.8-4.3z"/>
+    </g>
+  </symbol>
+  <symbol id="i-alarm" viewBox="0 0 24 24">
+    <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3.5 22 20H2z"/>
+      <path d="M12 10v4M12 17.2v.1"/>
+    </g>
+  </symbol>
+  <!-- One blade, drawn once and rotated. Blades that sweep, not straight ones:
+       four symmetric wedges are evenly spaced and correct and read as a plus
+       sign, because nothing about them says the thing turns. These lean into
+       the rotation, which is what a fan looks like when it is working.
+       This is the brand mark too — same shape in the header and on a home
+       screen, where it is the one thing that has to be recognisable at 40px. -->
+  <symbol id="i-fan" viewBox="0 0 24 24">
+    <g fill="currentColor">
+      <path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(0 12 12)"/>
+      <path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(90 12 12)"/>
+      <path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(180 12 12)"/>
+      <path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(270 12 12)"/>
+    </g>
+  </symbol>
+  <symbol id="i-boost" viewBox="0 0 24 24">
+    <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13 2 4 14h7l-1 8 9-12h-7z"/>
+    </g>
+  </symbol>
+</svg>
+<header>
+  <a class="brand" href="index.html">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(0 12 12)"/><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(90 12 12)"/><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(180 12 12)"/><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(270 12 12)"/></g></svg>
+    <h1><span class="brand-name">Freeway&nbsp;Pi</span><span class="brand-page" data-i18n="ui.nav.overview">Oversikt</span></h1>
+  </a>
+  <div class="head-right">
+    <div id="freshness" class="freshness" aria-live="polite" data-i18n="ui.connecting">kobler til…</div>
+    <button id="menu-button" class="icon-button" aria-label="Meny" data-i18n-aria-label="ui.menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<nav id="menu" class="menu" hidden>
+  <a class="menu-item current" href="index.html" data-i18n="ui.nav.overview">Oversikt</a>
+  <a class="menu-item" href="data.html" data-i18n="ui.nav.data">Data og grafer</a>
+  <a class="menu-item" href="settings.html" data-i18n="ui.nav.settings">Aggregatinnstillinger</a>
+  <a class="menu-item" href="programs.html" data-i18n="ui.nav.programs">Uke- og årsprogram</a>
+  <a class="menu-item" href="alarms.html" data-i18n="ui.nav.alarms">Aggregatalarmer</a>
+  <a class="menu-item" href="system.html" data-i18n="ui.nav.system">System</a>
+</nav>
+
+<main>
+  <div id="banner" class="banner" hidden>
+    <span id="banner-text"></span>
+    <button id="banner-action" class="banner-action" hidden></button>
+  </div>
+
+  <!-- The house is the status panel. Four numbers in the places the air is
+       actually at makes the machine legible in a way a list of labels does
+       not: you can see that the unit warms incoming air with outgoing air. -->
+  <div class="col-house">
+  <section class="card house-card">
+    <svg id="house" class="house" viewBox="0 -24 360 236" role="img" aria-labelledby="house-title">
+      <title id="house-title" data-i18n="ui.house.title">Luftveier gjennom aggregatet</title>
+
+      <!-- Walls meet the roof at the eaves. The ducts cross the left wall,
+           which is what puts "outside" outside. -->
+      <g class="link" id="link">
+        <circle id="link-dot" class="dot" cx="11" cy="-12" r="5"/>
+        <text id="link-label" data-i18n="ui.connecting" x="24" y="-7">kobler til…</text>
+      </g>
+
+      <path class="roof" d="M90 76 L225 16 L360 76"/>
+      <path class="wall" d="M98 76 V182 H352 V76"/>
+
+      <rect class="ahu" x="160" y="126" width="104" height="44" rx="8"/>
+      <text class="ahu-label" id="unit-name" data-i18n="ui.aggregate.default" x="212" y="143">aggregat</text>
+      <g class="ahu-fan" id="ahu-fan">
+        <use href="#i-fan" x="176" y="149" width="14" height="14"/>
+        <text id="ahu-fan-level" x="195" y="160">–</text>
+      </g>
+
+      <g class="flow air-outdoor">
+        <path d="M6 138 H149" marker-end="url(#a-outdoor)"/>
+        <text class="val" id="v-fresh" x="6" y="116">–</text>
+        <text x="6" y="130" data-i18n="ui.house.outdoor">Ute</text>
+      </g>
+      <g class="flow air-exhaust">
+        <path d="M154 162 H11" marker-end="url(#a-exhaust)"/>
+        <text class="val" id="v-waste" x="6" y="189">–</text>
+        <text x="6" y="203" data-i18n="ui.house.exhaust">Avkast</text>
+      </g>
+      <g class="flow air-supply">
+        <path d="M196 124 V93" marker-end="url(#a-supply)"/>
+        <text class="val right" id="v-supply" x="186" y="102">–</text>
+        <text class="right" x="186" y="116" data-i18n="ui.house.supply">Tilluft</text>
+      </g>
+      <!-- What the unit is doing to the air, in the empty quarter right of it.
+           One register says all three: HR49 is negative for cooling, 0 to 100
+           for recovery, and above 100 for recovery at full plus heating. -->
+      <g class="outputs" id="outputs">
+        <g class="output" id="out-recovery">
+          <use href="#i-recovery" x="272" y="130" width="20" height="20"/>
+          <text x="282" y="162">0 %</text>
+        </g>
+        <g class="output" id="out-heating">
+          <use href="#i-heating" x="298" y="130" width="20" height="20"/>
+          <text x="308" y="162">0 %</text>
+        </g>
+        <g class="output" id="out-cooling">
+          <use href="#i-cooling" x="324" y="130" width="20" height="20"/>
+          <text x="334" y="162">0 %</text>
+        </g>
+      </g>
+
+      <g class="flow air-extract">
+        <path d="M250 88 V119" marker-end="url(#a-extract)"/>
+        <text class="val" id="v-extract" x="262" y="102">–</text>
+        <text x="262" y="116" data-i18n="ui.house.extract">Avtrekk</text>
+      </g>
+
+      <defs>
+        <!-- One marker per colour. context-stroke would be tidier but is a
+             Firefox-only extension: Safari falls back to black and the colour
+             coding, which is the whole point of the drawing, disappears. -->
+        <marker id="a-outdoor" class="m-outdoor" viewBox="0 0 10 10" refX="4" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z"/></marker>
+        <marker id="a-exhaust" class="m-exhaust" viewBox="0 0 10 10" refX="4" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z"/></marker>
+        <marker id="a-supply" class="m-supply" viewBox="0 0 10 10" refX="4" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z"/></marker>
+        <marker id="a-extract" class="m-extract"  viewBox="0 0 10 10" refX="4" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z"/></marker>
+      </defs>
+    </svg>
+    <div class="house-foot">
+      <span id="chips" class="chips"></span>
+    </div>
+  </section>
+
+  <section class="card info-card">
+    <div class="card-label" data-i18n="ui.connection">Tilkobling</div>
+    <div id="connection"></div>
+  </section>
+
+  <section class="card more-card">
+    <details id="more">
+      <summary data-i18n="ui.more.readings">Flere målinger</summary>
+      <div class="readings" id="readings"></div>
+    </details>
+  </section>
+  </div>
+
+  <div class="col-main">
+
+  <section class="card temp control">
+    <div class="card-label" data-i18n="ui.temperature">Temperatur</div>
+    <div class="setpoint-row">
+      <button class="step" id="temp-down" aria-label="Senk temperatur" data-i18n-aria-label="ui.temperature.down">−</button>
+      <div class="setpoint"><output id="setpoint">–</output><span class="unit">°C</span></div>
+      <button class="step" id="temp-up" aria-label="Hev temperatur" data-i18n-aria-label="ui.temperature.up">+</button>
+    </div>
+  </section>
+
+  <section class="card control">
+    <div class="card-label" data-i18n="ui.fan.level">Viftenivå</div>
+    <div class="fan-row">
+      <input type="range" id="fan" min="20" max="100" step="5" value="50" aria-label="Viftenivå" data-i18n-aria-label="ui.fan.level">
+      <output id="fan-value">–</output>
+    </div>
+    <div class="card-foot" id="fan-foot"></div>
+  </section>
+
+  <section class="card control">
+    <div class="card-label" data-i18n="ui.overpressure">Overtrykk</div>
+    <div class="op-row">
+      <button class="primary" id="op-toggle" data-i18n="ui.start">Start</button>
+      <label class="op-minutes">
+        <input type="number" id="op-minutes" min="1" max="60" step="5" value="20" aria-label="Minutter" data-i18n-aria-label="ui.minutes">
+        <span data-i18n="ui.minutes.short">min</span>
+      </label>
+    </div>
+    <div class="card-foot" id="op-foot"></div>
+  </section>
+
+  <!-- Boost is the same kind of thing as overpressure: a timed mode with a
+       duration you set as you start it. It was one of the mode buttons, which
+       gave it no way to say how long and no way to show how long is left. -->
+  <section class="card control">
+    <div class="card-label" data-i18n="ui.boost">Boost</div>
+    <div class="op-row">
+      <button class="primary" id="boost-toggle" data-i18n="ui.start">Start</button>
+      <label class="op-minutes">
+        <input type="number" id="boost-minutes" min="1" max="60" step="5" value="30" aria-label="Minutter" data-i18n-aria-label="ui.minutes">
+        <span data-i18n="ui.minutes.short">min</span>
+      </label>
+    </div>
+    <div class="card-foot" id="boost-foot"></div>
+  </section>
+
+  <section class="card control">
+    <div class="card-label" data-i18n="ui.mode">Modus</div>
+    <div class="modes" id="modes"></div>
+  </section>
+
+  </div>
+</main>
+
+<dialog id="confirm">
+  <p id="confirm-text"></p>
+  <div class="dialog-buttons">
+    <button id="confirm-cancel" class="ghost" data-i18n="ui.cancel">Avbryt</button>
+    <button id="confirm-ok" class="danger" data-i18n="ui.confirm">Bekreft</button>
+  </div>
+</dialog>
+
+<script src="clock.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+[Unit]
+Description=Freeway Pi: end a temporary ssh opening when its time is up
+ConditionPathExists=/run/freeway-ssh-until
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo op=ssh-expire | /opt/freeway/bin/freeway-helper'
+TimeoutStartSec=30

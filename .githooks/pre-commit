@@ -1,0 +1,109 @@
+#!/bin/sh
+# Refuse a commit that would put identifying or secret material into the
+# repository.
+#
+# Git history is permanent: a later commit that removes a value leaves the
+# value behind in the earlier one, and rewriting history is a far worse job
+# than not needing to. A check that runs before the commit is the only one
+# that runs in time.
+#
+# Only generic patterns live here, because this file is itself committed.
+# Site-specific names — the hostnames, usernames and addresses of the place
+# this actually runs — belong in notes/pii-patterns.txt, which is ignored.
+#
+# Enable with:  git config core.hooksPath .githooks
+set -eu
+
+fail=0
+report() {
+	if [ "$fail" -eq 0 ]; then
+		echo "pre-commit: refusing to commit identifying or secret material." >&2
+		echo "" >&2
+	fi
+	fail=1
+	echo "  $1" >&2
+}
+
+# warn does not refuse. The patterns below match things that are usually fine
+# and occasionally are a reading taken in somebody's house; a check that blocked
+# on them would be switched off within a week.
+warn() {
+	echo "pre-commit: $1" >&2
+}
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -n "$staged" ] || exit 0
+
+# RFC 1918 addresses. 192.0.2.0/24, 198.51.100.0/24 and 203.0.113.0/24 are
+# reserved for documentation (RFC 5737) and are what examples should use.
+private_ip='(^|[^0-9.])(10\.[0-9]{1,3}|192\.168\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3})\.[0-9]{1,3}([^0-9.]|$)'
+
+for f in $staged; do
+	[ -f "$f" ] || continue
+	# The hook cannot flag itself for containing the patterns it matches on.
+	case "$f" in .githooks/pre-commit) continue ;; esac
+
+	if git show ":$f" | grep -nEq 2>/dev/null "$private_ip"; then
+		report "$f: a private network address. Use 192.0.2.x (RFC 5737) in examples."
+	fi
+	# example.com, example.net, example.org and .example are reserved for
+	# documentation (RFC 2606) and are what a placeholder in a form should say.
+	# Stripped before the match rather than exempted after it, so a real
+	# address on the same line is still caught.
+	if git show ":$f" \
+		| sed -E 's/[a-zA-Z0-9._%+-]+@(example\.(com|net|org)|[a-zA-Z0-9.-]+\.example)\b//g' \
+		| sed -E 's/\b(ssh|scp|rsync|sftp)( +[^ @]+)* +[a-z_][a-z0-9_-]*@[a-zA-Z0-9.-]+//g' \
+		| sed -E 's/[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]*\.(service|socket|timer|target|mount|path|slice)\b//g' \
+		| grep -nEq 2>/dev/null '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'; then
+		# An ssh target is user@host, which is the same shape as an address and
+		# is not one. Documenting "ssh fwadmin@freeway.local" is the point of
+		# the line, so the alternative was contorting the documentation around
+		# a check meant to protect it.
+		report "$f: what looks like an email address. Use name@example.net (RFC 2606) in examples."
+	fi
+	if git show ":$f" | grep -nq 2>/dev/null -- '-----BEGIN .*PRIVATE KEY-----'; then
+		report "$f: a private key."
+	fi
+	if git show ":$f" | grep -nEq 2>/dev/null '\bssh-(ed25519|rsa|dss) AAAA'; then
+		report "$f: an SSH public key. Identifying, even though it is not secret."
+	fi
+	if git show ":$f" | grep -nEq 2>/dev/null '(api[_-]?key|secret|passwd|password|token)["'"'"']?\s*[:=]\s*["'"'"'][^"'"'"']{12,}'; then
+		report "$f: what looks like a credential with a value."
+	fi
+
+	# Traces of the place this runs, rather than names of it. One measurement is
+	# nothing; enough of them and a stranger can describe a household — what
+	# equipment it has, how warm it is kept, when somebody is in. These two
+	# shapes are what actually accumulated here: a decimal temperature, which is
+	# a reading rather than a threshold, and a wall clock to the second, which is
+	# a moment somebody was watching. Go's reference layout is not either.
+	if git show ":$f" | grep -nEq 2>/dev/null '[0-9]+[.,][0-9] ?°C'; then
+		warn "$f: a temperature with a decimal. If it is a reading, say what it showed, not what it was."
+	fi
+	if git show ":$f" | grep -vaE '15:04:05' | grep -nEq 2>/dev/null '\b[0-9]{2}:[0-9]{2}:[0-9]{2}\b'; then
+		warn "$f: a clock time to the second. If it is a moment something was observed, the moment is rarely the point."
+	fi
+
+	# Site-specific patterns, one extended regular expression per line.
+	#
+	# A copyright line is the one place a name is meant to be public, so those
+	# lines are dropped before the match. Everything else on every other line
+	# is still checked — including a name that merely happens to sit near the
+	# word, since the line has to start with the notice to be exempt.
+	if [ -f notes/pii-patterns.txt ]; then
+		while IFS= read -r pat; do
+			case "$pat" in ''|\#*) continue ;; esac
+			if git show ":$f" \
+				| grep -vaE '^[[:space:]]*(//|#|\*)?[[:space:]]*Copyright \([Cc]\)' \
+				| grep -nEqi 2>/dev/null "$pat"; then
+				report "$f: matches a local pattern from notes/pii-patterns.txt."
+			fi
+		done < notes/pii-patterns.txt
+	fi
+done
+
+if [ "$fail" -ne 0 ]; then
+	echo "" >&2
+	echo "Fix the content, or commit with --no-verify if this is a false positive." >&2
+	exit 1
+fi

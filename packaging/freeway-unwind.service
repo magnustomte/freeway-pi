@@ -1,0 +1,29 @@
+[Unit]
+Description=Freeway Pi: undo a change that was never confirmed
+Documentation=file:/opt/freeway/bin/freeway-unwind
+# NetworkManager has to be up, because putting the network back is done
+# through nmcli. Ordered before the daemon so the interface is never showing
+# settings that are about to be pulled out from under it.
+# The helper script is run directly, as root, the same way its own armed timer
+# runs it — so this needs NetworkManager, not the helper's socket.
+After=NetworkManager.service
+Wants=NetworkManager.service
+Before=freewayd.service
+# Nothing to undo is the normal case and must not look like a fault.
+ConditionPathExistsGlob=|/var/lib/freeway-helper/network-before
+ConditionPathExistsGlob=|/var/lib/freeway-helper/wifi-before
+ConditionPathExistsGlob=|/var/lib/freeway-helper/nftables.before
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/opt/freeway/bin/freeway-unwind
+# Long enough for nmcli to bring a connection up, short enough that a boot
+# does not hang on it.
+TimeoutStartSec=90
+# A revert that cannot run must not keep the box from booting. The daemon and
+# the interface still come up, and the log says what was left undone.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

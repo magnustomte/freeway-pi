@@ -1,0 +1,19 @@
+notes/
+HANDOFF.md
+PLAN.md
+*.db
+*.db-wal
+*.db-shm
+config.yaml
+*.pem
+*.key
+backup-*.tar.zst
+/bin/
+/dist/
+*.json.local
+profile-*.json
+
+# Stock Raspberry Pi OS images, downloaded by packaging/build-image.sh. Several
+# gigabytes, not ours, and full of Debian's own keys and addresses — the
+# pre-commit hook refuses them, which is how this line came to be written.
+.image-cache/

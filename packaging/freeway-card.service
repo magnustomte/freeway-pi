@@ -1,0 +1,26 @@
+[Unit]
+Description=Freeway Pi: act on instructions left on the boot partition
+Documentation=file:/opt/freeway/bin/freeway-card
+# NetworkManager, because joining a wifi network goes through nmcli; nftables
+# and the ssh policy, because opening ssh reaches into a ruleset that has to
+# exist first.
+After=NetworkManager.service freeway-ssh-policy.service
+Wants=NetworkManager.service
+Before=freewayd.service
+# Nothing on the card is the normal case, on every boot but the one that
+# matters, and must not look like a fault.
+ConditionPathExistsGlob=|/boot/firmware/freeway.txt
+ConditionPathExistsGlob=|/boot/freeway.txt
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/opt/freeway/bin/freeway-card
+# Joining a wifi network is the slow part.
+TimeoutStartSec=120
+# A card that could not be acted on must not keep the box from booting; the
+# answer is written to the partition either way.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

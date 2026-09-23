@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title data-i18n="ui.title.settings">Freeway Pi — innstillinger</title>
+<meta name="theme-color" content="#0f1720" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Freeway Pi">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<script src="api/lang.js"></script>
+<script src="i18n.js"></script>
+<script src="theme.js"></script>
+  <script src="link.js"></script>
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(0 12 12)"/><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(90 12 12)"/><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(180 12 12)"/><path d="M11.72 9.11C12.55 5.72 17.74 5.16 19.43 5.76A9.70 9.70 0 0 1 21.70 12.00C20.90 11.38 16.09 7.21 12.28 9.11A2.90 2.90 0 0 0 11.72 9.11Z" transform="rotate(270 12 12)"/></g></svg>
+    <h1><span class="brand-name">Freeway&nbsp;Pi</span><span class="brand-page" data-i18n="ui.the.unit">Aggregatet</span></h1>
+  </a>
+  <div class="head-right">
+    <button id="logout" class="link-button" hidden data-i18n="ui.logout">Logg ut</button>
+    <button id="menu-button" class="icon-button" aria-label="Meny" data-i18n-aria-label="ui.menu" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<nav id="menu" class="menu" hidden>
+  <a class="menu-item" href="index.html" data-i18n="ui.nav.overview">Oversikt</a>
+  <a class="menu-item" href="data.html" data-i18n="ui.nav.data">Data og grafer</a>
+  <a class="menu-item current" href="settings.html" data-i18n="ui.nav.settings">Aggregatinnstillinger</a>
+  <a class="menu-item" href="programs.html" data-i18n="ui.nav.programs">Uke- og årsprogram</a>
+  <a class="menu-item" href="alarms.html" data-i18n="ui.nav.alarms">Aggregatalarmer</a>
+  <a class="menu-item" href="system.html" data-i18n="ui.nav.system">System</a>
+</nav>
+
+<main>
+  <div id="banner" class="banner" hidden><span id="banner-text"></span></div>
+
+  <!-- Three states, one at a time: no PIN yet, locked, or open. -->
+  <section class="card" id="gate" hidden>
+    <div class="card-label" id="gate-label" data-i18n="ui.locked">Låst</div>
+    <p class="gate-help" id="gate-help"></p>
+    <form class="gate-form" id="gate-form">
+      <input type="password" id="pin" inputmode="numeric" autocomplete="current-password"
+             placeholder="PIN eller passord" data-i18n-placeholder="ui.pin.placeholder" aria-label="PIN eller passord" data-i18n-aria-label="ui.pin.placeholder">
+      <button type="submit" class="primary" id="gate-submit" data-i18n="ui.unlock">Lås opp</button>
+    </form>
+    <p class="gate-note" id="gate-note"></p>
+  </section>
+
+  <div id="settings"></div>
+</main>
+
+<script src="crypto.js"></script>
+  <script src="gate.js"></script>
+<script src="clock.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>

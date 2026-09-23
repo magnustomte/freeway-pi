@@ -1,0 +1,132 @@
+# Binaries on every push and pull request; images on a version tag or by hand.
+#
+# The images take the better part of an hour each under qemu, so they are not
+# built for every push: the binaries prove the code builds and the tests pass,
+# and an image is only worth making when somebody is going to flash it.
+#
+# A tag v* ends in a draft release with every file and its .sha256. Draft,
+# because a release is a promise to whoever downloads it, and somebody should
+# flash the image and look at it before that promise is made.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  binaries:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Tags, so the version stamped into the binary is the release name.
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make vet test
+      - run: make dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist/
+          if-no-files-found: error
+
+  image:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: binaries
+    runs-on: ubuntu-24.04
+    strategy:
+      # One failing architecture says nothing about the other.
+      fail-fast: false
+      matrix:
+        arch: [arm64, armhf]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist/
+      - name: Install qemu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+
+      # The download URL always points at the newest release, so the cache is
+      # keyed on the file it redirects to. A new Raspberry Pi OS is a new key,
+      # and the image is never built on a stale base without saying so.
+      - name: Find the stock image
+        id: stock
+        run: |
+          case "${{ matrix.arch }}" in
+          arm64) url=https://downloads.raspberrypi.com/raspios_lite_arm64_latest ;;
+          armhf) url=https://downloads.raspberrypi.com/raspios_lite_armhf_latest ;;
+          esac
+          name=$(basename "$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$url")")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Stock image: $name" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/cache@v4
+        with:
+          path: .image-cache/raspios-${{ matrix.arch }}.img.xz
+          key: raspios-${{ steps.stock.outputs.name }}
+      # Only the compressed file is cached, a fifth of the size. The build
+      # script looks for the unpacked one, so it is unpacked here first.
+      - name: Unpack the cached stock image
+        run: |
+          f=.image-cache/raspios-${{ matrix.arch }}.img
+          if [ -f "$f.xz" ] && [ ! -f "$f" ]; then xz -dk "$f.xz"; fi
+
+      - name: Build the image
+        run: |
+          # The script runs as root in a checkout owned by the runner, and git
+          # refuses to describe a repository that belongs to somebody else.
+          sudo git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          sudo packaging/build-image.sh ${{ matrix.arch }}
+          sudo chown -R "$(id -u):$(id -g)" dist .image-cache
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.arch }}
+          path: dist/freeway-pi-${{ matrix.arch }}-*.img.xz
+          if-no-files-found: error
+          # Already xz at -9; zipping it again only costs time.
+          compression-level: 0
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [binaries, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out/
+          merge-multiple: true
+      - name: Checksums
+        working-directory: out
+        run: for f in *; do sha256sum "$f" > "$f.sha256"; done
+      # A signed statement that these files came from this workflow at this
+      # commit, checkable with "gh attestation verify".
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            out/freeway-pi-*.img.xz
+            out/freewayd-linux-*
+            out/fwprobe-linux-*
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "Freeway Pi $GITHUB_REF_NAME"

@@ -1,12 +1,14 @@
 # Binaries on every push and pull request; images on a version tag or by hand.
 #
-# The images take the better part of an hour each under qemu, so they are not
-# built for every push: the binaries prove the code builds and the tests pass,
-# and an image is only worth making when somebody is going to flash it.
+# The images take a quarter of an hour each under qemu, so they are not built
+# for every push: the binaries prove the code builds and the tests pass, and an
+# image is only worth making when somebody is going to flash it.
 #
-# A tag v* ends in a draft release with every file and its .sha256. Draft,
-# because a release is a promise to whoever downloads it, and somebody should
-# flash the image and look at it before that promise is made.
+# A tag v* ends in a draft release with both images and their .sha256. Only
+# the images: they are what people flash, and a bare binary is for somebody
+# building from source, who can find it on the run. Draft, because a release
+# is a promise to whoever downloads it, and somebody should flash the image and
+# look at it before that promise is made.
 name: build
 
 on:
@@ -110,6 +112,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: image-*
           path: out/
           merge-multiple: true
       - name: Checksums
@@ -119,10 +122,7 @@ jobs:
       # commit, checkable with "gh attestation verify".
       - uses: actions/attest-build-provenance@v2
         with:
-          subject-path: |
-            out/freeway-pi-*.img.xz
-            out/freewayd-linux-*
-            out/fwprobe-linux-*
+          subject-path: out/freeway-pi-*.img.xz
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -22,9 +22,13 @@ type Unit struct {
 	staleAfter time.Duration
 
 	// name is what the interface calls it, and may be changed while running.
-	name  atomic.Pointer[string]
-	timed timedModeTracker
-	seen  atomic.Bool
+	name atomic.Pointer[string]
+	// family is the model the unit last reported, kept so that a unit which
+	// has stopped answering is still called what it was a minute ago — which
+	// is exactly when a notification needs a name.
+	family atomic.Pointer[string]
+	timed  timedModeTracker
+	seen   atomic.Bool
 	// clockSettable records what was learnt by trying. Unknown until then,
 	// because a write to the setting block is answered the same way whether
 	// the board acts on it or not, and only this one has been measured.
@@ -54,22 +58,43 @@ func New(b *bus.Bus, p *bus.Poller, pollInterval time.Duration, name string) *Un
 // SetName changes what the interface calls this unit.
 //
 // Empty means "whatever it turns out to be": the unit says which model it is,
-// and a box that has never been given a name should show that rather than the
-// word "Aggregat". Somebody with two of them can still name them.
+// and a box that has never been given a name should show that rather than a
+// generic word. Somebody with two of them can still name them.
 func (u *Unit) SetName(name string) {
 	u.name.Store(&name)
 }
 
-// displayName is the name that was given, or what the unit says it is, or a
-// last resort for a unit that answers with a model code nobody has a name for.
+// displayName is the name that was given, or what the unit says it is, or
+// empty for a unit that answers with a model code nobody has a name for. Empty
+// rather than a word: the interface has one in each language, and the server
+// would only ever have one.
 func (u *Unit) displayName(st *eda.State) string {
+	if st.Machine.Family != "" {
+		f := st.Machine.Family
+		u.family.Store(&f)
+	}
 	if n := u.name.Load(); n != nil && *n != "" {
 		return *n
 	}
-	if st.Machine.Family != "" {
-		return st.Machine.Family
+	return st.Machine.Family
+}
+
+// Name is what to call this unit outside the interface, in a notification: the
+// name it was given, or the model it last reported, or empty. Asked each time
+// rather than remembered, so renaming it takes effect with the next message.
+func (u *Unit) Name() string {
+	if n := u.name.Load(); n != nil && *n != "" {
+		return *n
 	}
-	return "Aggregat"
+	if u.poller != nil {
+		if st, err := eda.Decode(u.poller.Current(), u.staleAfter); err == nil {
+			return u.displayName(st)
+		}
+	}
+	if f := u.family.Load(); f != nil {
+		return *f
+	}
+	return ""
 }
 
 // State returns the decoded state of the most recent snapshot.

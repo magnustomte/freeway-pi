@@ -71,7 +71,6 @@ type Watcher struct {
 	log    *slog.Logger
 	source Source
 	notify *notify.Notifier
-	unit   string
 	quiet  time.Duration
 
 	mu    sync.Mutex
@@ -95,8 +94,6 @@ type Options struct {
 	Interval time.Duration
 	// Notifier is told when the supply sags, or nil to say nothing.
 	Notifier *notify.Notifier
-	// Unit is what this installation is called, for the message.
-	Unit string
 	// Quiet is how long without an event before the condition is called over.
 	//
 	// Generous on purpose. A sagging supply comes and goes with whatever the
@@ -120,7 +117,7 @@ func (o Options) Watch() *Watcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Watcher{
 		log: o.Logger, source: o.Source, notify: o.Notifier,
-		unit: o.Unit, quiet: o.Quiet,
+		quiet:  o.Quiet,
 		cancel: cancel, done: make(chan struct{}),
 	}
 	go w.loop(ctx, o.Interval)
@@ -248,7 +245,6 @@ func (w *Watcher) tell(ctx context.Context) {
 			Key: key, Kind: "undervoltage", Severity: notify.Warning,
 			Title:   i18n.T(w.notify.Lang(), "notify.power.title"),
 			Message: i18n.T(w.notify.Lang(), "notify.power.message", s.Events),
-			Unit:    w.unit,
 		})
 	default:
 		w.notify.Clear(ctx, key)

@@ -31,7 +31,7 @@ type SMTP struct {
 }
 
 // Name identifies the channel.
-func (s *SMTP) Name() string { return "e-post" }
+func (s *SMTP) Name() string { return "email" }
 
 // Send delivers one event.
 func (s *SMTP) Send(ctx context.Context, e Event) error {
@@ -89,7 +89,10 @@ func (s *SMTP) Send(ctx context.Context, e Event) error {
 }
 
 func (s *SMTP) message(e Event) string {
-	subject := fmt.Sprintf("%s: %s", e.Unit, e.Title)
+	subject := e.Title
+	if e.Unit != "" {
+		subject = e.Unit + ": " + e.Title
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", s.From)
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(s.To, ", "))
@@ -101,8 +104,12 @@ func (s *SMTP) message(e Event) string {
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	b.WriteString("\r\n")
 	fmt.Fprintf(&b, "%s\r\n\r\n", e.Message)
-	fmt.Fprintf(&b, "Alvorlighet: %s\r\n", e.Level)
-	fmt.Fprintf(&b, "Tidspunkt:   %s\r\n", e.Time.Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(&b, "Aggregat:    %s\r\n", e.Unit)
+	// In the notifier's language, like the message above them.
+	l := e.lang
+	fmt.Fprintf(&b, "%s: %s\r\n", i18n.T(l, "notify.mail.severity"), i18n.T(l, "ui.notify.sev."+e.Level))
+	fmt.Fprintf(&b, "%s: %s\r\n", i18n.T(l, "notify.mail.time"), e.Time.Format("2006-01-02 15:04:05"))
+	if e.Unit != "" {
+		fmt.Fprintf(&b, "%s: %s\r\n", i18n.T(l, "notify.mail.unit"), e.Unit)
+	}
 	return b.String()
 }

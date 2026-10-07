@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"freewaypi/internal/i18n"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"freewaypi/internal/i18n"
 )
 
 type recorder struct {
@@ -35,7 +37,7 @@ func (r *recorder) all() []Event {
 func newNotifier(t *testing.T, min Severity) (*Notifier, *recorder) {
 	t.Helper()
 	r := &recorder{}
-	return New(Options{Channels: []Channel{r}, MinSeverity: min, UnitName: "Loft",
+	return New(Options{Channels: []Channel{r}, MinSeverity: min, UnitName: func() string { return "Loft" },
 		Logger: slog.New(slog.DiscardHandler)}), r
 }
 
@@ -162,6 +164,28 @@ func TestTheUnitIsNamedInEveryMessage(t *testing.T) {
 	}
 }
 
+func TestARenameShowsInTheNextMessage(t *testing.T) {
+	// The name is asked for when a message goes out, not when the notifier
+	// was built: renaming the unit, or the unit reporting its model after the
+	// daemon started, should not need a restart to reach a notification.
+	name := ""
+	r := &recorder{}
+	n := New(Options{Channels: []Channel{r}, MinSeverity: Info,
+		UnitName: func() string { return name }, Logger: slog.New(slog.DiscardHandler)})
+
+	n.Raise(context.Background(), Event{Key: "a", Severity: Warning, Title: "a"})
+	name = "Pelican"
+	n.Raise(context.Background(), Event{Key: "b", Severity: Warning, Title: "b"})
+
+	all := r.all()
+	if all[0].Unit != "" {
+		t.Errorf("first unit = %q, want empty: no name is better than a made-up one", all[0].Unit)
+	}
+	if all[1].Unit != "Pelican" {
+		t.Errorf("second unit = %q, want the name as it is now", all[1].Unit)
+	}
+}
+
 func TestWebhookPostsTheEventAsJSON(t *testing.T) {
 	var got Event
 	var auth string
@@ -252,7 +276,7 @@ func TestTheJournalKeepsWhatWasNotSent(t *testing.T) {
 		{"below the threshold", []Channel{&recorder{}}, Critical, "notify.skipped.severity"},
 		{"nowhere to send it", nil, Info, "notify.skipped.nochannel"},
 	} {
-		n := New(Options{Channels: c.channels, MinSeverity: c.min, UnitName: "Loft",
+		n := New(Options{Channels: c.channels, MinSeverity: c.min, UnitName: func() string { return "Loft" },
 			Logger: slog.New(slog.DiscardHandler)})
 		j := &journal{}
 		n.SetJournal(j)
@@ -360,5 +384,32 @@ func TestSeverityIsAStableWord(t *testing.T) {
 	// Configuration written in Norwegian is still read.
 	if ParseSeverity("kritisk") != Critical {
 		t.Error("the Norwegian word for critical is no longer understood")
+	}
+}
+
+func TestAMailIsWrittenInTheNotifiersLanguage(t *testing.T) {
+	// The labels around the message are the mail channel's own words, and
+	// they were Norwegian whatever the language — under an English message.
+	s := &SMTP{From: "freeway@example.net", To: []string{"owner@example.net"}}
+	e := Event{Title: "Service is due", Message: "Change the filters.",
+		Level: "warning", Time: time.Now(), lang: i18n.EN}
+
+	msg := s.message(e)
+	for _, want := range []string{"Subject: Service is due", "Severity: warning"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("mail lacks %q:\n%s", want, msg)
+		}
+	}
+	// No name, no line, and no subject starting with a colon.
+	if strings.Contains(msg, "Unit:") || strings.Contains(msg, "Subject: :") {
+		t.Errorf("an unnamed unit left a gap:\n%s", msg)
+	}
+
+	e.Unit, e.lang = "Pelican", i18n.NO
+	msg = s.message(e)
+	for _, want := range []string{"Subject: Pelican: Service is due", "Alvorlighet: advarsel", "Aggregat: Pelican"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("mail lacks %q:\n%s", want, msg)
+		}
 	}
 }

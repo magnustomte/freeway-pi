@@ -74,6 +74,11 @@ type Event struct {
 	Unit string `json:"unit"`
 	// Resolved marks the message that says a condition has ended.
 	Resolved bool `json:"resolved"`
+
+	// lang is what the notifier writes in, for a channel that adds words of
+	// its own around the message. Not sent: a webhook gets the words already
+	// written, and has no use for the code.
+	lang i18n.Lang
 }
 
 // Channel is somewhere events can be sent.
@@ -103,7 +108,7 @@ type Notifier struct {
 	mu       sync.Mutex
 	channels []Channel
 	min      Severity
-	unit     string
+	unit     func() string
 	log      *slog.Logger
 	// lang is what messages are written in. See config.Notify.Language.
 	lang i18n.Lang
@@ -125,8 +130,11 @@ type Notifier struct {
 type Options struct {
 	Channels    []Channel
 	MinSeverity Severity
-	UnitName    string
-	Logger      *slog.Logger
+	// UnitName says what the installation is called. Asked for each message
+	// rather than once, so a rename shows in the next one. Nil, or empty, and
+	// messages carry no name.
+	UnitName func() string
+	Logger   *slog.Logger
 	// Language is what messages are written in; empty is the default.
 	Language i18n.Lang
 }
@@ -136,9 +144,6 @@ func New(o Options) *Notifier {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
-	if o.UnitName == "" {
-		o.UnitName = "Aggregat"
-	}
 	if o.Language == "" {
 		o.Language = i18n.Default
 	}
@@ -146,6 +151,14 @@ func New(o Options) *Notifier {
 		channels: o.Channels, min: o.MinSeverity, unit: o.UnitName,
 		log: o.Logger, active: map[string]tracked{}, lang: o.Language,
 	}
+}
+
+// unitName is what the installation is called right now.
+func (n *Notifier) unitName() string {
+	if n.unit == nil {
+		return ""
+	}
+	return n.unit()
 }
 
 // Lang is the language messages are written in, for whatever raises them.
@@ -169,7 +182,7 @@ func (n *Notifier) SetLanguage(l i18n.Lang) {
 // the same key while it is still raised do nothing.
 func (n *Notifier) Raise(ctx context.Context, e Event) {
 	e.Time = time.Now()
-	e.Unit = n.unit
+	e.Unit = n.unitName()
 	e.Level = e.Severity.String()
 
 	n.mu.Lock()
@@ -214,7 +227,7 @@ func (n *Notifier) Clear(ctx context.Context, key string) {
 		Severity: Info, Level: Info.String(),
 		Title:   i18n.T(n.Lang(), "notify.resolved", raised.Title),
 		Message: raised.Message,
-		Time:    time.Now(), Unit: n.unit, Resolved: true,
+		Time:    time.Now(), Unit: n.unitName(), Resolved: true,
 	})
 }
 
@@ -235,6 +248,7 @@ func (n *Notifier) Active() []Event {
 // condition that was announced, so it cannot be noise, and an alert with no
 // all-clear leaves somebody believing a problem is still running.
 func (n *Notifier) dispatch(ctx context.Context, e Event) bool {
+	e.lang = n.Lang()
 	if e.Severity < n.min && !e.Resolved {
 		n.record(e, false, "notify.skipped.severity")
 		return false
@@ -344,7 +358,7 @@ func (n *Notifier) Test(ctx context.Context) error {
 		Key: "test", Kind: "test", Severity: Critical, Level: Critical.String(),
 		Title:   i18n.T(n.Lang(), "notify.test.title"),
 		Message: i18n.T(n.Lang(), "notify.test.message"),
-		Time:    time.Now(), Unit: n.unit,
+		Time:    time.Now(), Unit: n.unitName(),
 	}
 	n.mu.Lock()
 	channels := append([]Channel(nil), n.channels...)

@@ -8,8 +8,8 @@ import (
 )
 
 // TestDisplayNameFallsBackToTheModel: a unit that has never been given a name
-// should say what it is rather than the word "Aggregat", because the unit does
-// know — HR597 holds a code for the model.
+// should say what it is rather than a generic word, because the unit does know
+// — HR597 holds a code for the model.
 func TestDisplayNameFallsBackToTheModel(t *testing.T) {
 	u := &Unit{}
 	u.SetName("")
@@ -25,11 +25,33 @@ func TestDisplayNameFallsBackToTheModel(t *testing.T) {
 		t.Errorf("named unit = %q, want the name", got)
 	}
 
-	// And a unit whose model is not in the list still has to be called
-	// something.
+	// A unit whose model is not in the list gets no name from the server:
+	// the interface supplies one in the reader's language.
+	u2 := &Unit{}
+	u2.SetName("")
+	if got := u2.displayName(&eda.State{}); got != "" {
+		t.Errorf("unknown model = %q, want empty", got)
+	}
+}
+
+// TestNameFollowsARenameAndOutlivesTheLink: a notification asks for the name
+// when it is sent, so a rename shows in the next one, and a unit that has
+// stopped answering is still called the model it reported before.
+func TestNameFollowsARenameAndOutlivesTheLink(t *testing.T) {
+	u := &Unit{}
 	u.SetName("")
-	if got := u.displayName(&eda.State{}); got != "Aggregat" {
-		t.Errorf("unknown model = %q, want a last resort", got)
+	if got := u.Name(); got != "" {
+		t.Errorf("before the unit has answered = %q, want empty", got)
+	}
+
+	u.displayName(&eda.State{Machine: eda.Machine{Family: "Pelican"}})
+	if got := u.Name(); got != "Pelican" {
+		t.Errorf("after it answered = %q, want the model", got)
+	}
+
+	u.SetName("Loft")
+	if got := u.Name(); got != "Loft" {
+		t.Errorf("after a rename = %q, want the new name", got)
 	}
 }
 

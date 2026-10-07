@@ -2,12 +2,17 @@
 # is built too, so a Pi 2 remains a working fallback rather than a theoretical
 # one.
 
-# Three parts rather than one. "git describe" on an untagged repository gives
-# a bare hash like 03ecb66-dirty, which is the right thing in a log and a
-# baffling thing to read at the top of a web page. So the release name, the
+# Three parts rather than one. "git describe" on an untagged commit gives
+# something like v1.0.0-3-g03ecb66-dirty, which is the right thing in a log and
+# a baffling thing to read at the top of a web page. So the release name, the
 # commit and the build date are separate, and the interface shows the one that
 # means something with the others as fine print.
-VERSION := $(shell git describe --tags --exact-match 2>/dev/null || echo 0.1)
+#
+# A tagged commit is that release. Anything after it is the last release plus
+# "+dev", so a build between two releases never reads as older than the one it
+# came after; the commit beside it says which.
+VERSION := $(shell git describe --tags --exact-match 2>/dev/null || \
+	{ t=$$(git describe --tags --abbrev=0 2>/dev/null) && echo "$$t+dev"; } || echo dev)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)$(shell git diff --quiet 2>/dev/null || echo +dirty)
 BUILT   := $(shell date -u +%Y-%m-%d)
 GOFLAGS := -trimpath

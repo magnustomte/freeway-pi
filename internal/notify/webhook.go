@@ -63,7 +63,7 @@ func (w *Webhook) Send(ctx context.Context, e Event) error {
 	snippet, _ := io.ReadAll(io.LimitReader(res.Body, 512))
 
 	if res.StatusCode >= 300 {
-		return fmt.Errorf("webhook: %s svarte %s: %s", w.URL, res.Status, bytes.TrimSpace(snippet))
+		return fmt.Errorf("webhook: %s answered %s: %s", w.URL, res.Status, bytes.TrimSpace(snippet))
 	}
 	return nil
 }

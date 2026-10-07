@@ -21,7 +21,7 @@ func (f *fakeSource) Alarms() ([]eda.Alarm, error) { return f.alarms, nil }
 func newWatcher(t *testing.T) (*Watcher, *fakeSource, *recorder) {
 	t.Helper()
 	r := &recorder{}
-	n := New(Options{Channels: []Channel{r}, MinSeverity: Info, UnitName: "Loft",
+	n := New(Options{Channels: []Channel{r}, MinSeverity: Info, UnitName: func() string { return "Loft" },
 		Logger: slog.New(slog.DiscardHandler)})
 	src := &fakeSource{state: &eda.State{Link: eda.Link{Status: eda.LinkOK}}}
 	// Never ticks on its own; the tests drive check directly so they are not

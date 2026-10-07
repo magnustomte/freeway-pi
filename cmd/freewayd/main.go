@@ -158,7 +158,7 @@ func run(configPath string, writeConf bool) error {
 		go keepClockInStep(unit, cfg.Unit, log, stop)
 	}
 
-	notifier := startNotify(cfg, log)
+	notifier := startNotify(cfg, unit, log)
 	watcher := notify.Watch(unit, notifier, notify.WatcherOptions{
 		Interval:  cfg.Notify.Interval.Std(),
 		DownAfter: cfg.Notify.DownAfter.Std(),
@@ -170,7 +170,7 @@ func run(configPath string, writeConf bool) error {
 	// corrupts its card, throttles, and restarts at random, and every one of
 	// those looks like a different bug until somebody blames the charger.
 	powerWatch := power.Options{
-		Logger: log, Notifier: notifier, Unit: unitName(unit, cfg),
+		Logger: log, Notifier: notifier,
 		Source: hostctl.PowerLog,
 	}.Watch()
 	defer powerWatch.Close()
@@ -194,9 +194,6 @@ func run(configPath string, writeConf bool) error {
 		return hostctl.RebootPolicy{
 			Auto: current.Updates.RebootPolicy == "auto",
 			At:   time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location()),
-			// The name as the interface shows it, so somebody with two of
-			// these can tell which one is about to restart.
-			Unit: unitName(unit, current),
 		}
 	}, 15*time.Minute, log)
 
@@ -437,7 +434,7 @@ func startGateway(cfg config.Config, b *bus.Bus, log *slog.Logger) (*gateway.Ser
 
 // startNotify builds the channels from configuration. A box with none
 // configured still runs; it simply has nobody to tell.
-func startNotify(cfg config.Config, log *slog.Logger) *notify.Notifier {
+func startNotify(cfg config.Config, unit *control.Unit, log *slog.Logger) *notify.Notifier {
 	channels := notify.ChannelsFor(cfg.Notify)
 	if len(channels) == 0 {
 		log.Info("no notification channel is configured; alarms will only appear in the interface")
@@ -445,8 +442,10 @@ func startNotify(cfg config.Config, log *slog.Logger) *notify.Notifier {
 	return notify.New(notify.Options{
 		Channels:    channels,
 		MinSeverity: notify.ParseSeverity(cfg.Notify.MinSeverity),
-		UnitName:    cfg.Unit.Name,
-		Logger:      log,
+		// The name the interface shows, asked for with each message, so
+		// somebody with two of these can tell which one is talking.
+		UnitName: unit.Name,
+		Logger:   log,
 		// Parsed rather than taken as it is, so a language this build does not
 		// know falls back to the default instead of to message ids.
 		Language: i18n.Parse(cfg.Notify.Language, ""),
@@ -655,18 +654,6 @@ func applyPINReset(a *auth.Authenticator, log *slog.Logger) {
 	// Loud on purpose. Somebody changing the lock by taking the card out is
 	// either the owner or a problem, and either way it belongs in the log.
 	log.Warn("the PIN was reset from the boot partition; every session has ended")
-}
-
-// unitName is what to call this installation in a notification: what somebody
-// configured, or what the unit calls itself, or nothing rather than a guess.
-func unitName(u *control.Unit, cfg config.Config) string {
-	if cfg.Unit.Name != "" {
-		return cfg.Unit.Name
-	}
-	if st, err := u.State(); err == nil && st != nil {
-		return st.Name
-	}
-	return ""
 }
 
 // eventJournal writes notifications into the history file.

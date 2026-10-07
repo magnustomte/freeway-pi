@@ -37,8 +37,6 @@ type RebootPolicy struct {
 	Auto bool
 	// At is the hour and minute to do it, in the box's own timezone.
 	At time.Time
-	// Unit is what this installation is called, for the message.
-	Unit string
 }
 
 // ParseRebootAt reads "HH:MM", falling back to four in the morning — late
@@ -94,7 +92,7 @@ func WatchReboot(ctx context.Context, n *notify.Notifier, policy func() RebootPo
 	// raise reports the condition, and is called from both rhythms: a box that
 	// is about to restart has to have said so first, even when the chosen time
 	// arrives before the first poll.
-	raise := func(p RebootPolicy, because []string) {
+	raise := func(because []string) {
 		n.Raise(ctx, notify.Event{
 			Key:      key,
 			Kind:     "reboot_required",
@@ -103,7 +101,6 @@ func WatchReboot(ctx context.Context, n *notify.Notifier, policy func() RebootPo
 			// a webhook, where a catalogue id is not a message.
 			Title:   i18n.T(n.Lang(), "notify.reboot.title"),
 			Message: strings.Join(because, ", "),
-			Unit:    p.Unit,
 			Time:    time.Now(),
 		})
 	}
@@ -130,7 +127,7 @@ func WatchReboot(ctx context.Context, n *notify.Notifier, policy func() RebootPo
 		p := policy()
 
 		if !onClock {
-			raise(p, because)
+			raise(because)
 			continue
 		}
 		if !p.Auto {
@@ -139,7 +136,7 @@ func WatchReboot(ctx context.Context, n *notify.Notifier, policy func() RebootPo
 		if !DueAt(time.Now(), p.At.Hour(), p.At.Minute(), RebootWindow) {
 			continue
 		}
-		raise(p, because)
+		raise(because)
 		log.Warn("an update asked for a restart and the policy is automatic; restarting",
 			"because", because, "at", p.At.Format("15:04"))
 		if err := Reboot(ctx); err != nil {

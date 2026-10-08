@@ -68,9 +68,13 @@ ssh_deadline() {
 	echo "$d"
 }
 LOG=/var/log/freeway-apt.log
-# Which of the two apt jobs is running, so the interface can say "ser etter
-# oppdateringer" rather than "oppdaterer" for a job that installs nothing.
+# Which of the two apt jobs is running, so the interface can say "checking for
+# updates" rather than "updating" for a job that installs nothing.
 TASK_FILE=/run/freeway-apt-task
+# How the last one ended. Written by the job itself, because the unit is
+# collected as soon as it stops and takes its exit status with it: asking
+# systemd afterwards answers 0 for a job that failed.
+RESULT_FILE=/run/freeway-apt-result
 
 fail() {
 	# The reason goes back in the payload, which is the protocol's own way of
@@ -796,7 +800,12 @@ apt)
 			echo "--- $(date -Is) done"
 		'
 	else
+		# An installation cut off halfway — by a power cut, say — leaves dpkg
+		# refusing everything until it is finished, and nobody with a web page
+		# can type the command it asks for. So the upgrade finishes it first.
 		body='
+			echo "--- $(date -Is) dpkg --configure -a"
+			dpkg --force-confdef --force-confold --configure -a
 			echo "--- $(date -Is) apt-get update"
 			apt-get update
 			echo "--- $(date -Is) apt-get upgrade"
@@ -812,18 +821,29 @@ apt)
 	chmod 644 "$LOG"
 	printf '%s\n' "$TASK" > "$TASK_FILE"
 	chmod 644 "$TASK_FILE"
+	rm -f "$RESULT_FILE"
+	# set -e inside, so the first step that fails ends the job, and its
+	# status is what gets written down — not that of the last echo, which
+	# always succeeds and made a failed upgrade report as a finished one.
 	systemd-run --unit="$APT_UNIT" --collect \
 		--description="Freeway Pi: apt $TASK" \
 		--setenv=DEBIAN_FRONTEND=noninteractive \
 		/bin/sh -c "exec >>'$LOG' 2>&1
-$body" >/dev/null
+(
+set -e
+$body
+)
+rc=\$?
+[ \$rc -eq 0 ] || echo \"--- \$(date -Is) failed (\$rc)\"
+echo \$rc > '$RESULT_FILE'
+exit \$rc" >/dev/null
 	logger -t freeway-helper "started apt $TASK on request"
 	echo "started"
 	;;
 
 apt-status)
 	state=$(systemctl is-active "$APT_UNIT.service" 2>/dev/null || true)
-	code=$(systemctl show -p ExecMainStatus --value "$APT_UNIT.service" 2>/dev/null || echo "")
+	code=$(cat "$RESULT_FILE" 2>/dev/null || true)
 	echo "task=$(cat "$TASK_FILE" 2>/dev/null || true)"
 	echo "state=$state"
 	echo "code=${code:-0}"

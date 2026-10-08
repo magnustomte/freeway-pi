@@ -166,6 +166,24 @@ Unattended-Upgrade::Remove-Unused-Dependencies "true";
 CONF
 fi
 
+# Where updates may come from. unattended-upgrades as Debian ships it trusts
+# only archives labelled Debian, and Raspberry Pi OS has almost none: on 32-bit
+# every package comes from Raspbian, and on both the firmware, the kernel and
+# Raspberry Pi's own builds of openssl and wpasupplicant come from Raspberry Pi.
+# Without these lines nothing on a 32-bit box is ever patched, and a 64-bit one
+# only half. Neither archive has a separate security suite, so it is all of
+# stable or none of it.
+#
+# Written every time rather than once: it is ours, and a box installed before
+# this was written needs it as much as a new one.
+cat > /etc/apt/apt.conf.d/52freeway-origins <<'CONF'
+// Written by the Freeway Pi installer, and rewritten by every install.
+Unattended-Upgrade::Origins-Pattern {
+	"origin=Raspbian,codename=${distro_codename},label=Raspbian";
+	"origin=Raspberry Pi Foundation,codename=${distro_codename},label=Raspberry Pi Foundation";
+};
+CONF
+
 echo "==> configuration"
 if [ -f "$CONFDIR/config.json" ]; then
 	echo "    keeping the existing $CONFDIR/config.json"

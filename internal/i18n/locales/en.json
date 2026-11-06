@@ -266,7 +266,6 @@
   "setting.overpressure_supply.help": "The overpressure is the difference between this and the extract fan.",
   "setting.overpressure_supply.label": "Supply fan",
   "setting.service_interval_days.label": "Service interval",
-  "setting.service_reminder.label": "Service reminder",
   "setting.setpoint_max.label": "Highest allowed setpoint",
   "setting.setpoint_min.help": "Narrows what may be asked for, on the unit and from here. The unit’s own range is narrower than the register list claims.",
   "setting.setpoint_min.label": "Lowest allowed setpoint",

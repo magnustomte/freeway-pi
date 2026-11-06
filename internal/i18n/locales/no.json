@@ -266,7 +266,6 @@
   "setting.overpressure_supply.help": "Overtrykket er differansen mellom denne og avtrekksviften.",
   "setting.overpressure_supply.label": "Tilluftsvifte",
   "setting.service_interval_days.label": "Serviceintervall",
-  "setting.service_reminder.label": "Servicepåminnelse",
   "setting.setpoint_max.label": "Høyeste tillatte settpunkt",
   "setting.setpoint_min.help": "Grensen aggregatet selv håndhever for temperaturvalg.",
   "setting.setpoint_min.label": "Laveste tillatte settpunkt",

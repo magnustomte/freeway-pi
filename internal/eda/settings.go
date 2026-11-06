@@ -45,6 +45,11 @@ type Setting struct {
 // There is no global switch for timer programs; a program is off when its
 // function is set to none.
 //
+// Coil 49, the service reminder, went the same way although the list marks it
+// writable: the unit answers every write to it with server device failure, by
+// function code 5 and 15 alike, even one that writes the value it already
+// holds. Whether the reminder is on is still shown beside the countdown.
+//
 // Holding register 56 is the exception in the other direction. The list marks
 // it read only, and measurement on a live unit showed that it is not.
 var Settings = []Setting{
@@ -119,10 +124,6 @@ var Settings = []Setting{
 		addr: HRBoostLevel,
 	},
 
-	{
-		Key: "service_reminder", Label: "setting.service_reminder.label", Group: "setting.group.service",
-		Type: "bool", coil: true, addr: CoilServiceReminder,
-	},
 	{
 		Key: "service_interval_days", Label: "setting.service_interval_days.label", Group: "setting.group.service",
 		Type: "number", Unit: "ui.unit.days", Scale: 1, Min: 1, Max: 999, Step: 1,
